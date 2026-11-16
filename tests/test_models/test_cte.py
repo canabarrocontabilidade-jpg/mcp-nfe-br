@@ -9,6 +9,8 @@ from mcp_nfe_br.models.cte import (
     BRCteALCZFMCBS,
     BRCteCBS,
     BRCteDevTrib,
+    BRCteGCBSSN,
+    BRCteGIBSSN,
     BRCteIBSCBS,
     BRCteIBSMun,
     BRCteIBSUF,
@@ -17,6 +19,7 @@ from mcp_nfe_br.models.cte import (
     BRCteInfModal,
     BRCteParty,
     BRCteTomador,
+    BRCteTribSN,
     BRCteVPrest,
     CTeModal,
     CTeModelo,
@@ -316,3 +319,71 @@ def test_cte_pag_antecipado_accepts_matching_cnpj_base() -> None:
 def test_cte_pag_antecipado_rejects_bad_format() -> None:
     with pytest.raises(ValidationError, match="44 caracteres"):
         make_cte(tp_pag_ant="3", pag_antecipado=["too-short"])
+
+
+# --- NT 2026.004 v1.01 / NT 2026.005 v1.00 --------------------------------
+
+
+def test_cte_emitente_tp_regime_ibscbs_rv_1090_1091() -> None:
+    """NT 2026.005 RV 1090: CRT 1/2 requires '1'. RV 1091: CRT 3 requires 2, 3 or 4."""
+    with pytest.raises(ValidationError, match="RV 1090"):
+        make_cte_emitente(crt="1", tp_regime_ibscbs="2")
+    with pytest.raises(ValidationError, match="RV 1091"):
+        make_cte_emitente(crt="3", tp_regime_ibscbs="1")
+    assert make_cte_emitente(crt="1", tp_regime_ibscbs="1").tp_regime_ibscbs == "1"
+    assert make_cte_emitente(crt="3", tp_regime_ibscbs="4").tp_regime_ibscbs == "4"
+    assert make_cte_emitente(crt="3").tp_regime_ibscbs is None
+
+
+def _sn(*, ibs: bool, cbs: bool) -> BRCteTribSN:
+    return BRCteTribSN(
+        g_ibssn=BRCteGIBSSN(p_ibssn="0.10", v_ibssn="0.10") if ibs else None,
+        g_cbssn=BRCteGCBSSN(p_cbssn="0.90", v_cbssn="0.90") if cbs else None,
+    )
+
+
+def _imp_sn(sn: BRCteTribSN | None, *, gibscbs: BRCteIBSCBS | None = None) -> BRCteImp:
+    return BRCteImp(
+        icms=make_cte().imp.icms,
+        ibscbs=BRCteImpIBSCBS(cst="000", c_class_trib="000001", g_ibscbs=gibscbs, g_trib_sn=sn),
+    )
+
+
+def test_cte_simples_nacional_without_regular_regime_requires_both_sn_groups() -> None:
+    emit = make_cte_emitente(crt="1")
+    with pytest.raises(ValidationError, match="RV 1101"):
+        make_cte(emitente=emit, imp=_imp_sn(_sn(ibs=False, cbs=True)))
+    cte = make_cte(emitente=emit, imp=_imp_sn(_sn(ibs=True, cbs=True)))
+    assert cte.imp.ibscbs is not None and cte.imp.ibscbs.g_trib_sn is not None
+
+
+def test_cte_excesso_sublimite_without_regular_regime_cbs_only() -> None:
+    emit = make_cte_emitente(crt="2")
+    with pytest.raises(ValidationError, match="RV 1103"):
+        make_cte(emitente=emit, imp=_imp_sn(_sn(ibs=True, cbs=False)))
+    with pytest.raises(ValidationError, match="RV 1104"):
+        make_cte(emitente=emit, imp=_imp_sn(_sn(ibs=True, cbs=True)))
+    make_cte(emitente=emit, imp=_imp_sn(_sn(ibs=False, cbs=True)))
+
+
+def test_cte_regular_regime_forbids_gtribsn() -> None:
+    emit = make_cte_emitente(crt="1", tp_regime_ibscbs="1")
+    with pytest.raises(ValidationError, match="RV 1102"):
+        make_cte(emitente=emit, imp=_imp_sn(_sn(ibs=True, cbs=True)))
+
+
+def test_cte_pending_option_regimes_rv_1105_1106() -> None:
+    emit2 = make_cte_emitente(crt="3", tp_regime_ibscbs="2")
+    with pytest.raises(ValidationError, match="RV 1105"):
+        make_cte(emitente=emit2, imp=_imp_sn(_sn(ibs=False, cbs=True)))
+    emit3 = make_cte_emitente(crt="3", tp_regime_ibscbs="3")
+    with pytest.raises(ValidationError, match="RV 1106"):
+        make_cte(emitente=emit3, imp=_imp_sn(_sn(ibs=True, cbs=True)))
+    make_cte(emitente=emit3, imp=_imp_sn(_sn(ibs=False, cbs=True)))
+
+
+def test_cte_v_tot_dfe_rv_365_2026_repeats_vtprest() -> None:
+    cte = make_cte(imp=BRCteImp(icms=make_cte().imp.icms, v_tot_dfe="100.00"))
+    assert cte.imp.v_tot_dfe == "100.00"
+    with pytest.raises(ValidationError, match="RV 365"):
+        make_cte(imp=BRCteImp(icms=make_cte().imp.icms, v_tot_dfe="101.00"))

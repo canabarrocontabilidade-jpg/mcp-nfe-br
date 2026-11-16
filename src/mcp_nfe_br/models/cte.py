@@ -58,6 +58,27 @@ scope** for this change (different Notas Técnicas, not NT 2026.002):
 a new `TCTeSimp` document type and a `pgtoVinc`/`TPagamentoRTC` group both
 belong to NT 2026.001 ("VincPgto") and remain unimplemented.
 
+NT 2026.004 v1.01 (Valor Líquido) and NT 2026.005 v1.00 (Simples Nacional) —
+schema package upgraded to `PL_CTe_400_NT2026.005 RTC SN_1.00_corr.zip`, a
+superset of `PL_CTe_400_NT2026.004 RTC_1.01_corr.zip`. Implemented:
+`vPrest/vTPrestLiq`, `imp/vTotDFe` (RV 365), `emit/tpRegimeIBSCBS` (RV
+1090/1091), `imp/IBSCBS/gTribSN` (RV 1100-1106), and the rename of
+`gPagAntecipado/chCTePagAnt` to `chDFePagAnt`. Deliberately **not**
+implemented:
+- `ide/gMultaJuros` (RV 1072-1083): RV 1072 requires ICMS CST 41 (group
+  ICMS45), which this model does not support (CST 00 only).
+- `imp/ICMS/gICMSPrevistoPagtoAntecip` (RV 1051-1053, production 2027-03-01):
+  the bundled XSD declares it as a *sibling alternative* inside the `TImp`
+  choice, so it cannot coexist with `ICMS00` under the schema `[Unverified:
+  likely an XSD modelling limitation — confirm with the authority before
+  implementing]`.
+- `tpEmis=2` (offline contingency), EPEC/FSDA removal, the
+  `evApropriaCredPres` and Simples Nacional events, `CTeSimp` and CT-e OS:
+  the generator always emits `tpEmis=1`, and these document types and
+  events are outside this package's CT-e scope.
+- RV 1107 (MEI, CRT 4): `RegimeTributario` has no CRT 4 value. RV 1108/1109:
+  `ide/gCompraGov` is not modeled.
+
 The CT-e access-key type (`TChDFe`) also changed schema-wide (same
 `PL_CTe_400_NT2026.002` package) from `[0-9]{44}` to
 `[0-9]{6}[A-Z0-9]{12}[0-9]{26}` (alphanumeric-CNPJ-ready). As of BR-CTE-23
@@ -212,6 +233,41 @@ class BRCteEmitente(BRCteParty):
             "`[Verified locally]` — cteTiposBasico_v4.00.xsd (NT 2026.002 v1.01)."
         ),
     )
+    tp_regime_ibscbs: str | None = Field(
+        default=None,
+        pattern=r"^[1-4]$",
+        description=(
+            "Tipo de Regime de Apuração do IBS e da CBS (emit/tpRegimeIBSCBS, NT 2026.005 §3): "
+            "1=Simples Nacional (CRT 1 ou 2) com opção pelo regime regular; 2=Regime Normal "
+            "(CRT 3) com opção pendente pelo CRT 1, sem regime regular; 3=Regime Normal com "
+            "opção pendente pelo CRT 2, sem regime regular; 4=Regime Normal com opção pendente "
+            "pelo Simples Nacional, com regime regular. Não informar nas demais situações. "
+            "`[Verified locally]` — CTe_Nota_Tecnica_2026_005_SN_v100.pdf."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def check_tp_regime_ibscbs_vs_crt(self) -> BRCteEmitente:
+        """NT 2026.005 RV 1090 (CRT 1/2 => tpRegimeIBSCBS must be 1) and RV 1091
+        (CRT 3 => tpRegimeIBSCBS must be 2, 3 or 4). RV 1092 (MEI, CRT 4) does not
+        apply: `RegimeTributario` has no CRT 4 value."""
+        if self.tp_regime_ibscbs is None:
+            return self
+        if self.crt in (
+            RegimeTributario.SIMPLES_NACIONAL,
+            RegimeTributario.SIMPLES_NACIONAL_EXCESSO,
+        ):
+            if self.tp_regime_ibscbs != "1":
+                raise ValueError(
+                    "emit/tpRegimeIBSCBS deve ser '1' para emitente optante pelo Simples "
+                    "Nacional (CRT 1 ou 2) — NT 2026.005 RV 1090."
+                )
+        elif self.tp_regime_ibscbs not in ("2", "3", "4"):
+            raise ValueError(
+                "emit/tpRegimeIBSCBS deve ser '2', '3' ou '4' para emitente do Regime Normal "
+                "(CRT 3) — NT 2026.005 RV 1091."
+            )
+        return self
 
 
 class BRCteRemetente(BRCteParty):
@@ -276,6 +332,13 @@ class BRCteVPrest(BaseModel):
     """Valores da Prestação de Serviço (Grupo `vPrest`)."""
 
     v_tprest: str = Field(..., description="Valor Total da Prestação do Serviço")
+    v_tprest_liq: str | None = Field(
+        default=None,
+        description=(
+            "Valor Líquido total da Prestação SEM tributos (vPrest/vTPrestLiq, NT 2026.004 §2). "
+            "`[Verified locally]` — CTe_Nota_Tecnica_2026_004_v101.pdf."
+        ),
+    )
     v_rec: str = Field(..., description="Valor a Receber")
     comp: list[BRCteVPrestComp] = Field(
         default_factory=list, description="Componentes do valor da prestação"
@@ -484,6 +547,29 @@ class BRCteCBS(BaseModel):
     v_cbs: str = Field(..., description="Valor da CBS (vCBS)")
 
 
+class BRCteGIBSSN(BaseModel):
+    """IBS do Simples Nacional (`TTribSN/gIBSSN`, NT 2026.005 §5)."""
+
+    p_ibssn: str = Field(..., description="Alíquota efetiva do IBS para os optantes (pIBSSN)")
+    v_ibssn: str = Field(..., description="Valor do IBS para os optantes (vIBSSN)")
+
+
+class BRCteGCBSSN(BaseModel):
+    """CBS do Simples Nacional (`TTribSN/gCBSSN`, NT 2026.005 §5)."""
+
+    p_cbssn: str = Field(..., description="Alíquota efetiva da CBS para os optantes (pCBSSN)")
+    v_cbssn: str = Field(..., description="Valor da CBS para os optantes (vCBSSN)")
+
+
+class BRCteTribSN(BaseModel):
+    """Composição do IBS e da CBS para o Simples Nacional (`imp/IBSCBS/gTribSN`,
+    `TTribSN`). `[Verified locally]` — `DFeTiposBasicos_v1.00.xsd` from
+    `PL_CTe_400_NT2026.005 RTC SN_1.00_corr.zip` and NT 2026.005 §5."""
+
+    g_ibssn: BRCteGIBSSN | None = Field(default=None, description="Grupo gIBSSN")
+    g_cbssn: BRCteGCBSSN | None = Field(default=None, description="Grupo gCBSSN")
+
+
 class BRCteIBSCBS(BaseModel):
     """Grupo completo IBS/CBS (`TCIBS`, `imp/IBSCBS/gIBSCBS`)."""
 
@@ -531,6 +617,12 @@ class BRCteImpIBSCBS(BaseModel):
     g_ibscbs: BRCteIBSCBS | None = Field(
         default=None, description="Grupo de informações do IBS/CBS (gIBSCBS)"
     )
+    g_trib_sn: BRCteTribSN | None = Field(
+        default=None,
+        description=(
+            "Grupo de composição do IBS e da CBS para o Simples Nacional (gTribSN, NT 2026.005 §5)"
+        ),
+    )
     g_estorno_cred: BRCteEstornoCred | None = Field(
         default=None,
         description="Grupo de estorno de crédito, conforme indicador no cClassTrib (gEstornoCred)",
@@ -545,6 +637,13 @@ class BRCteImp(BaseModel):
     ibscbs: BRCteImpIBSCBS | None = Field(
         default=None,
         description="Grupo de informações do IBS e CBS (imp/IBSCBS) — Reforma Tributária do Consumo, NT 2026.002.",
+    )
+    v_tot_dfe: str | None = Field(
+        default=None,
+        description=(
+            "Valor total do documento fiscal (imp/vTotDFe, NT 2026.004 §4): em 2026 repete "
+            "vTPrest; a partir de 2027 é vTPrest + vIBS + vCBS."
+        ),
     )
 
 
@@ -724,7 +823,7 @@ class BRCTeDocument(InvoiceDocument):
         default_factory=list,
         description=(
             "Chaves de acesso dos CT-e de antecipação de pagamento "
-            "(ide/gPagAntecipado/chCTePagAnt) — só preenchido quando tpPagAnt=3."
+            "(ide/gPagAntecipado/chDFePagAnt) — só preenchido quando tpPagAnt=3."
         ),
     )
 
@@ -753,7 +852,8 @@ class BRCTeDocument(InvoiceDocument):
     @field_validator("pag_antecipado", mode="after")
     @classmethod
     def check_pag_antecipado_format(cls, v: list[str]) -> list[str]:
-        """`chCTePagAnt` uses the alphanumeric-ready `TChDFe` type
+        """`chDFePagAnt` (renamed from `chCTePagAnt` in the NT 2026.004 schema) uses the
+        alphanumeric-ready `TChDFe` type
         (`[0-9]{6}[A-Z0-9]{12}[0-9]{26}`), the same pattern now enforced on
         this document's own `chave_acesso` as of BR-CTE-23 (see
         `check_chave_acesso_format`)."""
@@ -761,7 +861,7 @@ class BRCTeDocument(InvoiceDocument):
             if not re.match(r"^[0-9]{6}[A-Z0-9]{12}[0-9]{26}$", key):
                 raise ValueError(
                     "Chave de acesso de antecipação de pagamento (ide/gPagAntecipado/"
-                    f"chCTePagAnt) fora do formato esperado (44 caracteres): {key!r}."
+                    f"chDFePagAnt) fora do formato esperado (44 caracteres): {key!r}."
                 )
         return v
 
@@ -791,7 +891,7 @@ class BRCTeDocument(InvoiceDocument):
     @model_validator(mode="after")
     def check_pag_antecipado_cnpj_base(self) -> BRCTeDocument:
         """NT 2026.002 RV 7.010. Self-contained: the CNPJ-Base is embedded
-        in `chCTePagAnt` itself (chars 6:14, per the verified `TChDFe`
+        in `chDFePagAnt` itself (chars 6:14, per the verified `TChDFe`
         layout), so no external lookup is needed to compare it against the
         emitente's own CNPJ-Base."""
         if not self.pag_antecipado:
@@ -918,5 +1018,85 @@ class BRCTeDocument(InvoiceDocument):
             raise ValueError(
                 f"vTribRegCBS ({v_trib_declared}) não corresponde a vBC x pAliqEfetRegCBS / 100 "
                 f"(esperado {expected}) — NT 2026.002 RV 6.005."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def check_simples_nacional_ibscbs_groups(self) -> BRCTeDocument:
+        """NT 2026.005 RV 1100-1106: which of `gIBSCBS` / `gTribSN` (and which
+        of its `gIBSSN` / `gCBSSN` subgroups) must or must not appear, by the
+        emitente's `CRT` and `tpRegimeIBSCBS`. Applies only when `imp/IBSCBS`
+        is present. RV 1107 (MEI) does not apply (no CRT 4 in
+        `RegimeTributario`); RV 1108/1109 (compra governamental da União) are
+        not enforced because `ide/gCompraGov` is not modeled."""
+        ibscbs = self.imp.ibscbs
+        if ibscbs is None:
+            return self
+        crt = self.emitente.crt
+        tp = self.emitente.tp_regime_ibscbs
+        sn = ibscbs.g_trib_sn
+        has_ibs = sn is not None and sn.g_ibssn is not None
+        has_cbs = sn is not None and sn.g_cbssn is not None
+
+        if crt == RegimeTributario.SIMPLES_NACIONAL and tp is None:
+            if ibscbs.g_ibscbs is not None:
+                raise ValueError(
+                    "gIBSCBS não pode ser informado para optante do Simples Nacional sem regime "
+                    "regular do IBS/CBS — NT 2026.005 RV 1100."
+                )
+            if not (has_ibs and has_cbs):
+                raise ValueError(
+                    "gTribSN com gIBSSN e gCBSSN é obrigatório para optante do Simples Nacional "
+                    "sem regime regular — NT 2026.005 RV 1101."
+                )
+        elif crt == RegimeTributario.SIMPLES_NACIONAL_EXCESSO and tp is None:
+            if not has_cbs:
+                raise ValueError(
+                    "Para excesso de sublimite sem regime regular, gTribSN deve conter gCBSSN — "
+                    "NT 2026.005 RV 1103."
+                )
+            if has_ibs:
+                raise ValueError(
+                    "Para excesso de sublimite sem regime regular, gIBSSN não deve ser informado "
+                    "— NT 2026.005 RV 1104."
+                )
+        elif tp in ("1", "4"):
+            if sn is not None:
+                raise ValueError(
+                    "gTribSN não deve ser informado para contribuinte no regime regular do "
+                    "IBS/CBS — NT 2026.005 RV 1102."
+                )
+        elif crt == RegimeTributario.REGIME_NORMAL and tp == "2":
+            if not (has_ibs and has_cbs):
+                raise ValueError(
+                    "Para opção pendente pelo CRT 1, gTribSN deve conter gIBSSN e gCBSSN — "
+                    "NT 2026.005 RV 1105."
+                )
+        elif crt == RegimeTributario.REGIME_NORMAL and tp == "3" and (not has_cbs or has_ibs):
+            raise ValueError(
+                "Para opção pendente pelo CRT 2, gTribSN deve conter apenas gCBSSN — "
+                "NT 2026.005 RV 1106."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def check_v_tot_dfe(self) -> BRCTeDocument:
+        """NT 2026.004 RV 365: `vTotDFe = vTPrest` for documents issued in 2026;
+        from 2027, `vTotDFe = vTPrest + vIBS + vCBS`. `[Unverified: the NT does
+        not state the comparison tolerance; exact 2-decimal equality is used]`."""
+        if self.imp.v_tot_dfe is None:
+            return self
+        try:
+            declared = Decimal(self.imp.v_tot_dfe)
+            expected = Decimal(self.v_prest.v_tprest)
+            year = int(self.dh_emi[:4])
+            g = self.imp.ibscbs.g_ibscbs if self.imp.ibscbs else None
+            if year >= 2027 and g is not None:
+                expected += Decimal(g.v_ibs) + Decimal(g.g_cbs.v_cbs)
+        except (InvalidOperation, ValueError):
+            return self
+        if declared != expected:
+            raise ValueError(
+                f"vTotDFe ({declared}) difere do esperado ({expected}) — NT 2026.004 RV 365."
             )
         return self

@@ -43,6 +43,7 @@ from mcp_einvoicing_core.xml_utils import xml_element, xml_optional
 from mcp_nfe_br.models.cte import (
     BRCTeDocument,
     BRCteParty,
+    BRCteTribSN,
     CTeModal,
 )
 from mcp_nfe_br.utils.cte_access_key import build_cte_access_key
@@ -79,6 +80,7 @@ def _emit_block(cte: BRCTeDocument) -> str:
         _endereco_block("enderEmit", emit.endereco, include_fone=True, fone=emit.fone),
         xml_element("CRT", emit.crt.value),
         xml_optional("ISUFEmit", emit.isuf_emit),
+        xml_optional("tpRegimeIBSCBS", emit.tp_regime_ibscbs),
     ]
     return xml_element("emit", "".join(p for p in parts if p), unsafe=True)
 
@@ -142,7 +144,7 @@ def _ide_block(cte: BRCTeDocument, *, c_ct: str, cdv: str) -> str:
 def _pag_antecipado_block(cte: BRCTeDocument) -> str:
     if not cte.pag_antecipado:
         return ""
-    keys = "".join(xml_element("chCTePagAnt", key) for key in cte.pag_antecipado)
+    keys = "".join(xml_element("chDFePagAnt", key) for key in cte.pag_antecipado)
     return xml_element("gPagAntecipado", keys, unsafe=True)
 
 
@@ -177,6 +179,7 @@ def _v_prest_block(cte: BRCTeDocument) -> str:
     )
     parts = [
         xml_element("vTPrest", v_prest.v_tprest),
+        xml_optional("vTPrestLiq", v_prest.v_tprest_liq),
         xml_element("vRec", v_prest.v_rec),
         comps,
     ]
@@ -197,6 +200,7 @@ def _imp_block(cte: BRCTeDocument) -> str:
         xml_element("ICMS", icms00, unsafe=True),
         xml_optional("vTotTrib", cte.imp.v_tot_trib),
         _ibscbs_block(cte),
+        xml_optional("vTotDFe", cte.imp.v_tot_dfe),
     ]
     return xml_element("imp", "".join(p for p in parts if p), unsafe=True)
 
@@ -271,6 +275,32 @@ def _estorno_cred_block(ec) -> str:
     )
 
 
+def _trib_sn_block(sn: BRCteTribSN | None) -> str:
+    """`gTribSN` (`TTribSN`, NT 2026.005): `gIBSSN? → gCBSSN?`."""
+    if sn is None:
+        return ""
+    parts = []
+    if sn.g_ibssn is not None:
+        parts.append(
+            xml_element(
+                "gIBSSN",
+                xml_element("pIBSSN", sn.g_ibssn.p_ibssn)
+                + xml_element("vIBSSN", sn.g_ibssn.v_ibssn),
+                unsafe=True,
+            )
+        )
+    if sn.g_cbssn is not None:
+        parts.append(
+            xml_element(
+                "gCBSSN",
+                xml_element("pCBSSN", sn.g_cbssn.p_cbssn)
+                + xml_element("vCBSSN", sn.g_cbssn.v_cbssn),
+                unsafe=True,
+            )
+        )
+    return xml_element("gTribSN", "".join(parts), unsafe=True)
+
+
 def _ibscbs_block(cte: BRCTeDocument) -> str:
     """`imp/IBSCBS` (`TTribCTe`). Sequence `[Verified locally]` against
     `PL_CTe_400_NT2026.002 RTC_1.00.zip`: `CST → cClassTrib → indDoacao? →
@@ -326,6 +356,7 @@ def _ibscbs_block(cte: BRCTeDocument) -> str:
             unsafe=True,
         )
         parts.append(g_ibscbs)
+    parts.append(_trib_sn_block(ibscbs.g_trib_sn))
     parts.append(_estorno_cred_block(ibscbs.g_estorno_cred))
     return xml_element("IBSCBS", "".join(p for p in parts if p), unsafe=True)
 

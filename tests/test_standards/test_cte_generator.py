@@ -109,3 +109,44 @@ def test_generate_ibscbs_and_pag_antecipado_validate_against_xsd() -> None:
 
     result = CTeXSDValidator().validate(xml)
     assert result.valid is True, result.errors
+
+
+def test_generate_nt_2026_004_005_fields_validate_against_xsd() -> None:
+    """NT 2026.004 v1.01 (`vTPrestLiq`, `vTotDFe`, `chDFePagAnt`) and NT 2026.005 v1.00
+    (`emit/tpRegimeIBSCBS`, `imp/IBSCBS/gTribSN`) validate against the schema package
+    `PL_CTe_400_NT2026.005 RTC SN_1.00_corr.zip`."""
+    from mcp_nfe_br.models.cte import BRCteGCBSSN, BRCteGIBSSN, BRCteTribSN, BRCteVPrest
+
+    key = "35070111222333" + "0" * 30
+    cte = make_cte(
+        emitente=make_cte_emitente(crt="1"),
+        v_prest=BRCteVPrest(v_tprest="100.00", v_tprest_liq="90.00", v_rec="100.00"),
+        imp=BRCteImp(
+            icms=make_cte().imp.icms,
+            v_tot_dfe="100.00",
+            ibscbs=BRCteImpIBSCBS(
+                cst="000",
+                c_class_trib="000001",
+                g_trib_sn=BRCteTribSN(
+                    g_ibssn=BRCteGIBSSN(p_ibssn="0.10", v_ibssn="0.10"),
+                    g_cbssn=BRCteGCBSSN(p_cbssn="0.90", v_cbssn="0.90"),
+                ),
+            ),
+        ),
+        tp_pag_ant="3",
+        pag_antecipado=[key],
+    )
+    xml = CTeGenerator().generate(cte)
+    assert "<vTPrestLiq>90.00</vTPrestLiq>" in xml
+    assert "<chDFePagAnt>" in xml and "chCTePagAnt" not in xml
+    assert "<gTribSN><gIBSSN>" in xml
+    result = CTeXSDValidator().validate(xml)
+    assert result.valid is True, result.errors
+
+
+def test_generate_tp_regime_ibscbs_validates_against_xsd() -> None:
+    cte = make_cte(emitente=make_cte_emitente(crt="3", tp_regime_ibscbs="4"))
+    xml = CTeGenerator().generate(cte)
+    assert "<tpRegimeIBSCBS>4</tpRegimeIBSCBS>" in xml
+    result = CTeXSDValidator().validate(xml)
+    assert result.valid is True, result.errors
