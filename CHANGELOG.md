@@ -10,6 +10,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- NF-e/NFC-e: `prod/vUnComLiq` + `vProdLiq` (`v_un_com_liq`, `v_prod_liq`) and `total/vProdLiqTot` (`v_prod_liq_tot`) from Nota Técnica 2026.008 v1.01, with rules I11c-20, W01a-10 and W01a-20.
+- NF-e/NFC-e: `emit/tpRegimeIBSCBS` (`tp_regime_ibscbs`), `prod/cAtivSN` (`c_ativ_sn`), item `gTribSN` and total `gTribSN` from Nota Técnica 2026.005 v1.00, with the total rules W59h-10, W59h-20, W59i-10 and W59j-10.
+- NF-e/NFC-e: group YC `gPgtoVinc` (`g_pgto_vinc`, split-payment linkage) from Nota Técnica 2026.006 v1.01.
+
+### Changed
+- NF-e/NFC-e schema package upgraded to `PL_010h_v1.03` (bundles NT 2026.005, 2026.006 and 2026.008 on top of `PL_010f`). The bundled `leiauteNFe`, `DFeTiposBasicos` and `tiposBasico` schemas are now the official files.
+
+### Known limitations
+- The existing item-level `IBSCBS` and total `IBSCBSTot` emission does not validate against the official schema (element name casing and `IBSCBSTot` placement inside `ICMSTot`). New `gTribSN` output follows the schema element order but sits inside that structure; fixing the surrounding IBS/CBS emission is tracked separately.
+- `ICMSPrevistoPagtoAntecip` (NT 2026.008, enforcement from 2027-03-01) and the new events (110300, 412140) are not implemented.
+
+### Added
 - CT-e: `vPrest/vTPrestLiq` (`v_tprest_liq`) and `imp/vTotDFe` (`v_tot_dfe`, rule 365) from Nota Técnica 2026.004 v1.01 (Valor Líquido).
 - CT-e: `emit/tpRegimeIBSCBS` (`tp_regime_ibscbs`, rules 1090/1091) and `imp/IBSCBS/gTribSN` (`g_trib_sn`, rules 1100-1106) from Nota Técnica 2026.005 v1.00 (Simples Nacional).
 

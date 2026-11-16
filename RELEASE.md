@@ -1,5 +1,14 @@
 # mcp-nfe-br — Release Notes
 
+## v0.11.0 (2026-11-16) — NF-e/NFC-e schema PL_010h_v1.03 (NT 2026.005, 2026.006, 2026.008)
+
+- Bundled NF-e/NFC-e schema upgraded to `PL_010h_v1.03`.
+- New fields: `vUnComLiq`/`vProdLiq` and `vProdLiqTot` (NT 2026.008); `emit/tpRegimeIBSCBS`, `cAtivSN`, item and total `gTribSN` (NT 2026.005); group YC `gPgtoVinc` (NT 2026.006), with the NT validation rules that can be checked locally.
+- Production date for all three Notas Técnicas: 2026-11-16 (rule NB01-30: 2027-03-01).
+- NFS-e Via: reference specs refreshed to layout v1.01 (NT 010); the package still does not support NFS-e Via.
+- Known limitations: the existing item `IBSCBS` and total `IBSCBSTot` emission does not validate against the official schema (tracked for the next release); `ICMSPrevistoPagtoAntecip` and events 110300/412140 are not implemented.
+- 320 tests passing (1 skipped); audit gate 0 blocking.
+
 ## v0.10.0 (2026-11-16) — CT-e Valor Líquido (NT 2026.004 v1.01) and Simples Nacional (NT 2026.005 v1.00)
 
 - Bundled CT-e schema upgraded to `PL_CTe_400_NT2026.005 RTC SN_1.00` (includes the NT 2026.004 v1.01 changes).

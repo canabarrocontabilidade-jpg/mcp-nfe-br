@@ -25,6 +25,7 @@ concrete date as of NT 2025.002 v1.50 — do not hardcode]`.
 
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 
 from mcp_einvoicing_core import InvoiceLineItem
@@ -111,6 +112,42 @@ class BREmitente(BaseModel):
             "010e_v.1.02 [Verified locally — PL_010e_v1.02, leiauteNFe_v4.00.xsd]"
         ),
     )
+    tp_regime_ibscbs: str | None = Field(
+        default=None,
+        pattern=r"^[1-4]$",
+        description=(
+            "Tipo de Regime de Apuração do IBS e da CBS (C21a, NT 2026.005): 1=Simples Nacional "
+            "(CRT 1 ou 2) com opção pelo regime regular; 2=Regime Normal (CRT 3) com opção "
+            "pendente pelo CRT 1, sem regime regular; 3=Regime Normal com opção pendente pelo "
+            "CRT 2, sem regime regular; 4=Regime Normal com opção pendente pelo Simples "
+            "Nacional, com regime regular. Não informar nas demais situações. "
+            "[Verified locally — NFe_NT_2026.005_v1.00_RTC_SimplesNacional.pdf]"
+        ),
+    )
+
+    @model_validator(mode="after")
+    def check_tp_regime_ibscbs_vs_crt(self) -> BREmitente:
+        """NT 2026.005 §2.1: CRT 1/2 only allows `tpRegimeIBSCBS=1`; CRT 3 only
+        allows 2, 3 or 4. `[Unverified: the NT text gives these as filling
+        guidance; the numbered NF-e validation rule and its cStat were not in
+        the supplied pages, so no rule ID is cited]`."""
+        if self.tp_regime_ibscbs is None:
+            return self
+        if self.crt in (
+            RegimeTributario.SIMPLES_NACIONAL,
+            RegimeTributario.SIMPLES_NACIONAL_EXCESSO,
+        ):
+            if self.tp_regime_ibscbs != "1":
+                raise ValueError(
+                    "emit/tpRegimeIBSCBS deve ser '1' para emitente optante pelo Simples Nacional "
+                    "(CRT 1 ou 2) — NT 2026.005 §2.1."
+                )
+        elif self.tp_regime_ibscbs not in ("2", "3", "4"):
+            raise ValueError(
+                "emit/tpRegimeIBSCBS deve ser '2', '3' ou '4' para emitente do Regime Normal "
+                "(CRT 3) — NT 2026.005 §2.1."
+            )
+        return self
 
     @model_validator(mode="after")
     def check_one_document(self) -> BREmitente:
@@ -287,6 +324,65 @@ class BRGrupoIBSCBS(BaseModel):
         description="Valor do IBS, soma de vIBSUF e vIBSMun (UB54a)",
     )
     cbs: BRGrupoCBS | None = Field(default=None, description="Grupo de informações da CBS (UB55)")
+    g_trib_sn: BRGrupoTribSN | None = Field(
+        default=None,
+        description="Composição do IBS e da CBS para o Simples Nacional (UB115a, NT 2026.005)",
+    )
+
+
+class BRGrupoIBSSN(BaseModel):
+    """IBS do Simples Nacional (Grupo UB, subgrupo gIBSSN — UB115b-UB115d, NT 2026.005)."""
+
+    p_ibssn: str = Field(..., description="Alíquota efetiva do IBS para os optantes (UB115c)")
+    v_ibssn: str = Field(..., description="Valor do IBS para os optantes do Simples (UB115d)")
+
+
+class BRGrupoCBSSN(BaseModel):
+    """CBS do Simples Nacional (Grupo UB, subgrupo gCBSSN — UB115e-UB115g, NT 2026.005)."""
+
+    p_cbssn: str = Field(..., description="Alíquota efetiva da CBS para os optantes (UB115f)")
+    v_cbssn: str = Field(..., description="Valor da CBS para os optantes do Simples (UB115g)")
+
+
+class BRGrupoTribSN(BaseModel):
+    """Composição do IBS e da CBS para o Simples Nacional (gTribSN, UB115a, NT 2026.005).
+
+    `gIBSSN` is optional (0-1) and `gCBSSN` mandatory (1-1) per the NT layout table;
+    `[Verified locally]` — NFe_NT_2026.005_v1.00_RTC_SimplesNacional.pdf and
+    `DFeTiposBasicos_v1.00.xsd` (`TTribSN`) from PL_010h_v1.03."""
+
+    g_ibssn: BRGrupoIBSSN | None = Field(default=None, description="Grupo gIBSSN (UB115b)")
+    g_cbssn: BRGrupoCBSSN = Field(..., description="Grupo gCBSSN (UB115e)")
+
+
+class BRGrupoTribSNTot(BaseModel):
+    """Totais do IBS e da CBS para o Simples Nacional (W03, gTribSN — W59h-W59j, NT 2026.005)."""
+
+    v_ibssn: str = Field(..., description="Valor total do IBS para os optantes do Simples (W59i)")
+    v_cbssn: str = Field(..., description="Valor total da CBS para os optantes do Simples (W59j)")
+
+
+class BRPgtoVinc(BaseModel):
+    """Pagamento previsto vinculado ao DF-e (Grupo YC, gPgto — YC02-YC07, NT 2026.006).
+
+    `nPag` is assigned by the generator from list order (1-based); the XSD rejects
+    duplicate `nPag` and `idTransacao`. `[Verified locally]` —
+    NFe_NT_2026.006_v1.01_RTC_VinculacaoPagamento.pdf, `TPgtoVinc` in PL_010h_v1.03."""
+
+    id_transacao: str = Field(
+        ..., min_length=2, max_length=35, description="Identificador da transação financeira (YC04)"
+    )
+    tp_meio_pgto: str = Field(
+        ...,
+        pattern=r"^[0-9]{2}$",
+        description="Código do meio de pagamento (YC05); Tabela Nacional de Meios de Pagamento",
+    )
+    cnpj_receb: str = Field(
+        ..., pattern=r"^[A-Z0-9]{12}[0-9]{2}$", description="CNPJ do recebedor (YC06)"
+    )
+    cnpj_base_psp: str = Field(
+        ..., pattern=r"^[A-Z0-9]{8}$", description="CNPJ base da instituição de pagamento (YC07)"
+    )
 
 
 class BRGrupoIBSUFTot(BaseModel):
@@ -365,6 +461,9 @@ class BRGrupoIBSCBSTot(BaseModel):
     )
     ibs: BRGrupoIBSTot | None = Field(default=None, description="Grupo total do IBS (W36)")
     cbs: BRGrupoCBSTot | None = Field(default=None, description="Grupo total da CBS (W50)")
+    g_trib_sn: BRGrupoTribSNTot | None = Field(
+        default=None, description="Totais do IBS/CBS do Simples Nacional (W59h, NT 2026.005)"
+    )
 
 
 class BRInvoiceLine(InvoiceLineItem):
@@ -404,6 +503,26 @@ class BRInvoiceLine(InvoiceLineItem):
     v_un_trib: str = Field(..., description="Valor unitário de tributação")
     ind_tot: str = Field(
         default="1", description="Indica se o valor do item entra no total da NF-e: 0=não, 1=sim"
+    )
+    v_un_com_liq: str | None = Field(
+        default=None,
+        description=(
+            "Valor líquido unitário, sem tributos (I11b vUnComLiq, NT 2026.008). Informar "
+            "junto com `v_prod_liq` (sequência I11a). [Verified locally — "
+            "NFe_NT_2026.008_v1.01_RTC_ValorLiquido.pdf]"
+        ),
+    )
+    v_prod_liq: str | None = Field(
+        default=None,
+        description="Valor líquido do produto ou serviço, sem tributos (I11c vProdLiq, NT 2026.008)",
+    )
+    c_ativ_sn: str | None = Field(
+        default=None,
+        pattern=r"^(01|02|03|04|90)$",
+        description=(
+            "Código de atividade do Simples Nacional (I17d cAtivSN, NT 2026.005): 01, 02, 03, "
+            "04 ou 90. Somente para optante do Simples Nacional ou com opção pendente."
+        ),
     )
 
     icms_orig: str = Field(
@@ -631,6 +750,22 @@ class BRInvoice(InvoiceDocument):
     ibscbs_tot: BRGrupoIBSCBSTot | None = Field(
         default=None, description="Totais da NF-e com IBS e CBS (W34)"
     )
+    v_prod_liq_tot: str | None = Field(
+        default=None,
+        description=(
+            "Valor total líquido dos produtos ou serviços, sem tributos (W01a vProdLiqTot, "
+            "NT 2026.008): soma dos `v_prod_liq` dos itens."
+        ),
+    )
+    g_pgto_vinc: list[BRPgtoVinc] = Field(
+        default_factory=list,
+        max_length=99,
+        description=(
+            "Vinculação com a transação de pagamento do DF-e (Grupo YC gPgtoVinc, NT 2026.006, "
+            "split payment). Informar quando a transação de pagamento foi iniciada antes da "
+            "emissão do DF-e."
+        ),
+    )
     v_nf_tot: str | None = Field(
         default=None,
         description=(
@@ -644,4 +779,86 @@ class BRInvoice(InvoiceDocument):
     def check_modelo_requirements(self) -> BRInvoice:
         if self.modelo == NFeModelo.NFCE and not self.pagamentos:
             raise ValueError("NFC-e (modelo 65) requer ao menos um elemento <detPag>.")
+        return self
+
+    @model_validator(mode="after")
+    def check_valor_liquido(self) -> BRInvoice:
+        """NT 2026.008: `vUnComLiq`/`vProdLiq` come as a pair (I11a); I11c-20 (cStat 1279)
+        `vProdLiq = vUnComLiq x qCom` within 0.01 when `finNFe=1`; W01a-10 (1282)
+        `vProdLiqTot` required when any item has `vProdLiq`; W01a-20 (1283) equals the sum."""
+        liq_items = [ln for ln in self.lines if ln.v_prod_liq is not None]
+        for ln in self.lines:
+            if (ln.v_prod_liq is None) != (ln.v_un_com_liq is None):
+                raise ValueError(
+                    "vUnComLiq e vProdLiq devem ser informados em conjunto (I11a) — NT 2026.008."
+                )
+        try:
+            if self.fin_nfe == "1":
+                for ln in liq_items:
+                    expected = Decimal(ln.v_un_com_liq or "0") * Decimal(ln.q_com)
+                    if abs(Decimal(ln.v_prod_liq or "0") - expected) > Decimal("0.01"):
+                        raise ValueError(
+                            "vProdLiq difere de vUnComLiq x qCom (tolerância 0,01) — "
+                            "NT 2026.008 I11c-20 (cStat 1279)."
+                        )
+            if liq_items and self.v_prod_liq_tot is None:
+                raise ValueError(
+                    "vProdLiqTot não informado, mas há item com vProdLiq — NT 2026.008 W01a-10 "
+                    "(cStat 1282)."
+                )
+            if self.v_prod_liq_tot is not None and liq_items:
+                total = sum((Decimal(ln.v_prod_liq or "0") for ln in liq_items), Decimal("0"))
+                if Decimal(self.v_prod_liq_tot) != total:
+                    raise ValueError(
+                        f"vProdLiqTot ({self.v_prod_liq_tot}) difere do somatório dos itens "
+                        f"({total}) — NT 2026.008 W01a-20 (cStat 1283)."
+                    )
+        except InvalidOperation:
+            return self
+        return self
+
+    @model_validator(mode="after")
+    def check_trib_sn_totals(self) -> BRInvoice:
+        """NT 2026.005 W59h-10/20 (cStat 1275/1276), W59i-10 (1277), W59j-10 (1284):
+        `total/IBSCBSTot/gTribSN` is informed exactly when at least one item carries
+        `gTribSN`, and its `vIBSSN`/`vCBSSN` equal the sums over the items."""
+        sn_items = [
+            ln.ibs_cbs.g_trib_sn for ln in self.lines if ln.ibs_cbs and ln.ibs_cbs.g_trib_sn
+        ]
+        tot = self.ibscbs_tot.g_trib_sn if self.ibscbs_tot else None
+        if sn_items and tot is None:
+            raise ValueError(
+                "Grupo de totais gTribSN não informado, mas há item com gTribSN — "
+                "NT 2026.005 W59h-10 (cStat 1275)."
+            )
+        if tot is not None and not sn_items:
+            raise ValueError(
+                "Grupo de totais gTribSN informado indevidamente: nenhum item possui gTribSN — "
+                "NT 2026.005 W59h-20 (cStat 1276)."
+            )
+        if tot is None:
+            return self
+        try:
+            v_ibs = sum((Decimal(g.g_ibssn.v_ibssn) for g in sn_items if g.g_ibssn), Decimal("0"))
+            v_cbs = sum((Decimal(g.g_cbssn.v_cbssn) for g in sn_items), Decimal("0"))
+            if Decimal(tot.v_ibssn) != v_ibs:
+                raise ValueError(
+                    f"Total do IBS do Simples Nacional ({tot.v_ibssn}) difere da soma dos itens "
+                    f"({v_ibs}) — NT 2026.005 W59i-10 (cStat 1277)."
+                )
+            if Decimal(tot.v_cbssn) != v_cbs:
+                raise ValueError(
+                    f"Total da CBS do Simples Nacional ({tot.v_cbssn}) difere da soma dos itens "
+                    f"({v_cbs}) — NT 2026.005 W59j-10 (cStat 1284)."
+                )
+        except InvalidOperation:
+            return self
+        return self
+
+    @model_validator(mode="after")
+    def check_g_pgto_vinc_unique(self) -> BRInvoice:
+        """NT 2026.006 YC04-20: `idTransacao` must not repeat (enforced by the XSD)."""
+        ids = [p.id_transacao for p in self.g_pgto_vinc]
+        if len(ids) != len(set(ids)):
+            raise ValueError("idTransacao duplicado em gPgtoVinc — NT 2026.006 YC04-20.")
         return self

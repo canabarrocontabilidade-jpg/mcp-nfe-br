@@ -56,6 +56,7 @@ from mcp_einvoicing_core.xml_utils import format_amount, format_quantity, xml_el
 from mcp_nfe_br.models.invoice import (
     BREndereco,
     BRGrupoIBSCBSTot,
+    BRGrupoTribSN,
     BRInvoice,
     BRInvoiceLine,
 )
@@ -145,6 +146,7 @@ def _emit_block(invoice: BRInvoice) -> str:
         xml_optional("IEST", emit.ie_st),
         xml_optional("IM", emit.im),
         xml_element("CRT", emit.crt.value),
+        xml_optional("tpRegimeIBSCBS", emit.tp_regime_ibscbs),
         xml_optional("ISUFEmit", emit.isuf_emit),
     ]
     return xml_element("emit", "".join(p for p in parts if p), unsafe=True)
@@ -494,8 +496,31 @@ def _ibs_cbs_block(line: BRInvoiceLine) -> str:
         ibs_mun_xml,
         xml_optional("vIBS", _d2(g.v_ibs) if g.v_ibs else None),
         cbs_xml,
+        _trib_sn_xml(g.g_trib_sn),
     ]
     return xml_element("IBSCBS", "".join(p for p in parts if p), unsafe=True)
+
+
+def _trib_sn_xml(sn: BRGrupoTribSN | None) -> str:
+    """`gTribSN` (UB115a, `TTribSN`): `gIBSSN? -> gCBSSN`. `[Verified locally]` element order
+    against `DFeTiposBasicos_v1.00.xsd` from PL_010h_v1.03."""
+    if sn is None:
+        return ""
+    ibs = ""
+    if sn.g_ibssn is not None:
+        ibs = xml_element(
+            "gIBSSN",
+            xml_element("pIBSSN", _percent(sn.g_ibssn.p_ibssn))
+            + xml_element("vIBSSN", _d2(sn.g_ibssn.v_ibssn)),
+            unsafe=True,
+        )
+    cbs = xml_element(
+        "gCBSSN",
+        xml_element("pCBSSN", _percent(sn.g_cbssn.p_cbssn))
+        + xml_element("vCBSSN", _d2(sn.g_cbssn.v_cbssn)),
+        unsafe=True,
+    )
+    return xml_element("gTribSN", ibs + cbs, unsafe=True)
 
 
 def _ibscbs_tot_xml(tot: BRGrupoIBSCBSTot) -> str:
@@ -578,9 +603,21 @@ def _ibscbs_tot_xml(tot: BRGrupoIBSCBSTot) -> str:
             xml_optional("vBCIBSCBS", _d2(tot.v_bc_ibscbs) if tot.v_bc_ibscbs else None),
             ibs_xml,
             cbs_xml,
+            _trib_sn_tot_xml(tot),
         ]
     )
     return xml_element("IBSCBSTot", inner, unsafe=True)
+
+
+def _trib_sn_tot_xml(tot: BRGrupoIBSCBSTot) -> str:
+    if tot.g_trib_sn is None:
+        return ""
+    return xml_element(
+        "gTribSN",
+        xml_element("vIBSSN", _d2(tot.g_trib_sn.v_ibssn))
+        + xml_element("vCBSSN", _d2(tot.g_trib_sn.v_cbssn)),
+        unsafe=True,
+    )
 
 
 def _det_block(line: BRInvoiceLine, n_item: int) -> str:
@@ -595,11 +632,14 @@ def _det_block(line: BRInvoiceLine, n_item: int) -> str:
         xml_element("qCom", _qty(line.q_com)),
         xml_element("vUnCom", _unit_price(line.v_un_com)),
         xml_element("vProd", _d2(line.v_prod)),
+        xml_optional("vUnComLiq", _unit_price(line.v_un_com_liq) if line.v_un_com_liq else None),
+        xml_optional("vProdLiq", _d2(line.v_prod_liq) if line.v_prod_liq else None),
         xml_element("cEANTrib", line.c_ean_trib),
         xml_element("uTrib", line.u_trib),
         xml_element("qTrib", _qty(line.q_trib)),
         xml_element("vUnTrib", _unit_price(line.v_un_trib)),
         xml_element("indTot", line.ind_tot),
+        xml_optional("cAtivSN", line.c_ativ_sn),
     ]
     prod = xml_element("prod", "".join(prod_parts), unsafe=True)
 
@@ -691,7 +731,14 @@ def _icms_tot_block(invoice: BRInvoice) -> str:
         icms_tot_inner += xml_element("vISTot", _d2(invoice.v_is_tot))
     if invoice.ibscbs_tot is not None:
         icms_tot_inner += _ibscbs_tot_xml(invoice.ibscbs_tot)
-    return xml_element("total", xml_element("ICMSTot", icms_tot_inner, unsafe=True), unsafe=True)
+    v_prod_liq_tot = xml_optional(
+        "vProdLiqTot", _d2(invoice.v_prod_liq_tot) if invoice.v_prod_liq_tot else None
+    )
+    return xml_element(
+        "total",
+        v_prod_liq_tot + xml_element("ICMSTot", icms_tot_inner, unsafe=True),
+        unsafe=True,
+    )
 
 
 def _transp_block(invoice: BRInvoice) -> str:
@@ -722,6 +769,25 @@ def _pag_block(invoice: BRInvoice) -> str:
         det_pags.append(xml_element("detPag", "".join(p for p in parts if p), unsafe=True))
 
     return xml_element("pag", "".join(det_pags), unsafe=True)
+
+
+def _pgto_vinc_block(invoice: BRInvoice) -> str:
+    """`gPgtoVinc` (YC01, NT 2026.006): `gPgto[nPag, idTransacao]` x 1-99, each
+    `tpMeioPgto -> CNPJReceb -> CNPJBasePSP`. Sits after `pag` in `infNFe`."""
+    if not invoice.g_pgto_vinc:
+        return ""
+    items = "".join(
+        xml_element(
+            "gPgto",
+            xml_element("tpMeioPgto", p.tp_meio_pgto)
+            + xml_element("CNPJReceb", p.cnpj_receb)
+            + xml_element("CNPJBasePSP", p.cnpj_base_psp),
+            attrs={"nPag": str(n), "idTransacao": p.id_transacao},
+            unsafe=True,
+        )
+        for n, p in enumerate(invoice.g_pgto_vinc, start=1)
+    )
+    return xml_element("gPgtoVinc", items, unsafe=True)
 
 
 def _ide_block(invoice: BRInvoice, *, cnf: str, cdv: str) -> str:
@@ -801,7 +867,7 @@ class NFeGenerator(BaseDocumentGenerator[InvoiceDocument]):
         transp = _transp_block(invoice)
         pag = _pag_block(invoice)
 
-        inf_nfe_body = ide + emit + dest + dets + total + transp + pag
+        inf_nfe_body = ide + emit + dest + dets + total + transp + pag + _pgto_vinc_block(invoice)
         inf_nfe = xml_element(
             "infNFe",
             inf_nfe_body,

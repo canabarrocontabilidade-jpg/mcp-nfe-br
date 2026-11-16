@@ -29,7 +29,22 @@ Source zip: `arquivos-xsd-16dez2025.zip` (2025-12-16, gitignored). `[Verified lo
 | `tiposSimples_v1.00.xsd` | Simple types / string patterns |
 | `xmldsig-core-schema_v1.00.xsd` | W3C XML-DSig core schema |
 
+## Schema v1.01 (NT 010, 2026-09-11; extracted into `specs/nfse-via/schemas/`)
+
+Source zip: `schemas_v1-01_atualizado.zip` (gitignored). Adds `NFSeVia_v1.01.xsd`, `EventoVia_v1.01.xsd`,
+`ProcNFSeVia_v1.01.xsd`, `ProcEventoVia_v1.01.xsd`, `tiposComplexos_v1.01.xsd`, `tiposEventos_v1.01.xsd`,
+`tiposSimples_v1.01.xsd` alongside the v1.00 files. Per NT 010 the layout change is the domain of
+`NFSeVia/infNFSeVia/valores/modPagamento` (adds `6 = Sem cobrança`) plus the new
+Evento de Manifestação do Adquirente. `[Verified locally — NT 010 text; XSDs not yet diffed field by field]`
+
 ## Notas Técnicas (gitignored PDFs)
+
+| File | Covers |
+|---|---|
+| `nt-010-se-cgnfse-leiaute-nfse-via-v-1.00.pdf` | NT 010 v1.00 (2026-09-11) — NFS-e Via layout v1.01 and the Evento de Manifestação do Adquirente. Supersedes the layout in NT 006 for `modPagamento`. |
+| `manual-para-emissao-nfs-e-via-v-1-02.pdf` | Manual para emissão da NFS-e Via v1.02 — adds the Manifestação do Adquirente event instructions. |
+| `anexo-iv-leiautesrn_adn-snnfsevia_v1-00-05.xlsx` | Anexo IV Leiautes RN ADN (revision .05): layout v1.01 plus the Manifestação event layout and rules. |
+
 
 | File | Covers |
 |---|---|
