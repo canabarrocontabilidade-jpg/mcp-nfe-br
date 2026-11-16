@@ -1,5 +1,14 @@
 # mcp-nfe-br — Release Notes
 
+## v0.10.0 (2026-11-16) — CT-e Valor Líquido (NT 2026.004 v1.01) and Simples Nacional (NT 2026.005 v1.00)
+
+- Bundled CT-e schema upgraded to `PL_CTe_400_NT2026.005 RTC SN_1.00` (includes the NT 2026.004 v1.01 changes).
+- New fields: `vPrest/vTPrestLiq`, `imp/vTotDFe` (rule 365), `emit/tpRegimeIBSCBS` (rules 1090/1091), `imp/IBSCBS/gTribSN` (rules 1100-1106).
+- `gPagAntecipado/chCTePagAnt` is now emitted as `chDFePagAnt`, matching the renamed schema element.
+- Production dates: NT 2026.004 v1.01 on 2026-12-14; NT 2026.005 fields on 2026-11-16, validation rules on 2026-12-14.
+- Not implemented: `ide/gMultaJuros` (needs ICMS CST 41) and `imp/ICMS/gICMSPrevistoPagtoAntecip` (schema choice conflict with `ICMS00`).
+- 313 tests passing (1 skipped); audit gate 0 blocking.
+
 ## v0.9.1 (2026-09-12) — Raise core dependency floor to 1.34.1
 
 - Lower-bound pin on `mcp-einvoicing-core` raised to `>=1.34.1` (was `>=1.33.0`). This package's own CI now runs `CHECK_PUBLIC_HYGIENE`, the pre-publish audit check that blocks accidental citations of the private orchestration repo.
