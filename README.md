@@ -171,7 +171,7 @@ Phase 1 coverage for per-item tax groups:
 | PIS/COFINS | CST `01`/`02` (rate-based) or `04`-`09` (non-taxed) | group omitted if `pis_cst`/`cofins_cst` are `None` |
 | IPI | CST `00`/`49`/`50`/`99` (taxed) or other (non-taxed) | group omitted if `ipi_cst` is `None` |
 
-`[NEED: IBS/CBS/Imposto Seletivo — Grupo UB/W03 (NT 2025.002-RTC) not yet modeled]`.
+IBS/CBS (item `IBSCBS` including `gTribSN`, and the monofásico group `gIBSCBSMono`), Imposto Seletivo and the totals groups (`ISTot`, `IBSCBSTot`) are modeled and XSD-validated against PL_010h_v1.03. Emitters without `emit/IE` (contribuinte exclusivo do IBS/CBS, NT 2026.007) are supported and authorized on SVRS. Diferimento, devolução, redução and Suframa subgroups are not yet modeled.
 
 ---
 
