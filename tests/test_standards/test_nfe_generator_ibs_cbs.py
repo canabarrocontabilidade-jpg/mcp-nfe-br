@@ -175,10 +175,12 @@ def test_ibs_cbs_gcbs_missing_value_raises() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_v_is_tot_emitted_in_icms_tot() -> None:
+def test_v_is_tot_emitted_as_is_tot_group() -> None:
+    """`vIS` lives in a `<ISTot>` sibling of `<ICMSTot>` (BR-NFE-RTC-3), not in ICMSTot."""
     invoice = make_nfe(v_is_tot="10.00")
     xml = NFeGenerator().generate(invoice)
-    assert "<vISTot>10.00</vISTot>" in xml
+    assert "<ISTot><vIS>10.00</vIS></ISTot>" in xml
+    assert "<vISTot>" not in xml
     assert "<ICMSTot>" in xml
 
 

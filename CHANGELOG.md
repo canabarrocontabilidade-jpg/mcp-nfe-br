@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- NF-e/NFC-e: IBS/CBS emission now validates against the official PL_010h_v1.03 schema. Item `IBSCBS` emits `CST` (was `cst`), wraps `vBC`/`gIBSUF`/`gIBSMun`/`vIBS`/`gCBS` in the `gIBSCBS` group, and places `gTribSN` as its sibling. `ISTot` (`vIS`) and `IBSCBSTot` are emitted as children of `total` after `ICMSTot` instead of inside it, and `vNFTot` (`v_nf_tot`) is now emitted. XSD-validating tests cover the item group, the totals and `gTribSN`.
+
 ### Added
 - NF-e/NFC-e: `prod/vUnComLiq` + `vProdLiq` (`v_un_com_liq`, `v_prod_liq`) and `total/vProdLiqTot` (`v_prod_liq_tot`) from Nota Técnica 2026.008 v1.01, with rules I11c-20, W01a-10 and W01a-20.
 - NF-e/NFC-e: `emit/tpRegimeIBSCBS` (`tp_regime_ibscbs`), `prod/cAtivSN` (`c_ativ_sn`), item `gTribSN` and total `gTribSN` from Nota Técnica 2026.005 v1.00, with the total rules W59h-10, W59h-20, W59i-10 and W59j-10.

@@ -442,7 +442,12 @@ def _ibs_cbs_block(line: BRInvoiceLine) -> str:
     Returns "" when `line.ibs_cbs` is None.
     Raises `DocumentGenerationError` when a subgroup is present but its
     mandatory value field is absent (partial population guard).
-    [Unverified — XML element names per NT_2025.002_v1.50_RTC; verify against final XSD]
+
+    `[Verified locally]` element names and order against `TTribNFe`/`TCIBS_NFe` in
+    `DFeTiposBasicos_v1.00.xsd` (PL_010h_v1.03): `CST`, `cClassTrib`, `indDoacao?`,
+    then the `gIBSCBS` wrapper (`vBC`, `gIBSUF`, `gIBSMun`, `vIBS`, `gCBS`), then
+    `gTribSN?` as a sibling of the wrapper. Completeness of the wrapper's mandatory
+    children is checked by `NFeXSDValidator`, not here.
     """
     g = line.ibs_cbs
     if g is None:
@@ -487,15 +492,20 @@ def _ibs_cbs_block(line: BRInvoiceLine) -> str:
         )
         cbs_xml = xml_element("gCBS", cbs_inner, unsafe=True)
 
+    g_ibscbs_inner = "".join(
+        [
+            xml_optional("vBC", _d2(g.v_bc) if g.v_bc else None),
+            ibs_uf_xml,
+            ibs_mun_xml,
+            xml_optional("vIBS", _d2(g.v_ibs) if g.v_ibs else None),
+            cbs_xml,
+        ]
+    )
     parts = [
-        xml_optional("cst", g.cst),
+        xml_optional("CST", g.cst),
         xml_optional("cClassTrib", g.c_class_trib),
         xml_optional("indDoacao", g.ind_doacao),
-        xml_optional("vBC", _d2(g.v_bc) if g.v_bc else None),
-        ibs_uf_xml,
-        ibs_mun_xml,
-        xml_optional("vIBS", _d2(g.v_ibs) if g.v_ibs else None),
-        cbs_xml,
+        xml_element("gIBSCBS", g_ibscbs_inner, unsafe=True) if g_ibscbs_inner else "",
         _trib_sn_xml(g.g_trib_sn),
     ]
     return xml_element("IBSCBS", "".join(p for p in parts if p), unsafe=True)
@@ -524,9 +534,10 @@ def _trib_sn_xml(sn: BRGrupoTribSN | None) -> str:
 
 
 def _ibscbs_tot_xml(tot: BRGrupoIBSCBSTot) -> str:
-    """Serialize <IBSCBSTot> (Grupo W03, W34-W56b).
+    """Serialize <IBSCBSTot> (Grupo W03, W34-W56b, `TIBSCBSMonoTot`).
 
-    [Unverified — XML element names per NT_2025.002_v1.50_RTC; verify against final XSD]
+    `[Verified locally]` against `DFeTiposBasicos_v1.00.xsd` (PL_010h_v1.03). The group
+    is a direct child of `<total>`, a sibling of `<ICMSTot>`, never nested inside it.
     """
     ibs_xml = ""
     if tot.ibs is not None:
@@ -727,16 +738,25 @@ def _icms_tot_block(invoice: BRInvoice) -> str:
         "vNF": v_nf,
     }
     icms_tot_inner = "".join(xml_element(tag, _d2(val)) for tag, val in fields.items())
-    if invoice.v_is_tot is not None:
-        icms_tot_inner += xml_element("vISTot", _d2(invoice.v_is_tot))
-    if invoice.ibscbs_tot is not None:
-        icms_tot_inner += _ibscbs_tot_xml(invoice.ibscbs_tot)
     v_prod_liq_tot = xml_optional(
         "vProdLiqTot", _d2(invoice.v_prod_liq_tot) if invoice.v_prod_liq_tot else None
     )
+    # `total` child order per PL_010h_v1.03: vProdLiqTot, ICMSTot, ISSQNtot, retTrib,
+    # ISTot, IBSCBSTot, vNFTot. `ISTot`/`IBSCBSTot`/`vNFTot` are siblings of `ICMSTot`.
+    is_tot = (
+        xml_element("ISTot", xml_element("vIS", _d2(invoice.v_is_tot)), unsafe=True)
+        if invoice.v_is_tot is not None
+        else ""
+    )
+    ibscbs_tot = _ibscbs_tot_xml(invoice.ibscbs_tot) if invoice.ibscbs_tot is not None else ""
+    v_nf_tot = xml_optional("vNFTot", _d2(invoice.v_nf_tot) if invoice.v_nf_tot else None)
     return xml_element(
         "total",
-        v_prod_liq_tot + xml_element("ICMSTot", icms_tot_inner, unsafe=True),
+        v_prod_liq_tot
+        + xml_element("ICMSTot", icms_tot_inner, unsafe=True)
+        + is_tot
+        + ibscbs_tot
+        + v_nf_tot,
         unsafe=True,
     )
 
