@@ -1,5 +1,12 @@
 # mcp-nfe-br — Release Notes
 
+## v0.11.1 (2026-11-21) — IBS/CBS emission validates against PL_010h_v1.03
+
+- Fix: item `IBSCBS` now emits `CST`, the `gIBSCBS` group (`vBC`, `gIBSUF`, `gIBSMun`, `vIBS`, `gCBS`) and `gTribSN` as its sibling, matching the official schema.
+- Fix: `ISTot` (`vIS`) and `IBSCBSTot` are emitted as children of `total` after `ICMSTot`, not inside it; `vNFTot` is now emitted.
+- Resolves the v0.11.0 known limitation. XSD-validating tests cover the item group, totals and `gTribSN`.
+- 326 tests passing (1 skipped); audit gate 0 blocking.
+
 ## v0.11.0 (2026-11-16) — NF-e/NFC-e schema PL_010h_v1.03 (NT 2026.005, 2026.006, 2026.008)
 
 - Bundled NF-e/NFC-e schema upgraded to `PL_010h_v1.03`.
