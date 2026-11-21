@@ -211,7 +211,7 @@ Retorna `{"chave_acesso": ..., "cnf": ...}`.
 
 ## Ferramentas CT-e (modelo 57)
 
-A cobertura de CT-e (Conhecimento de Transporte Eletrônico) começou na v0.6.0. **O escopo v1 é intencionalmente restrito**: apenas modal rodoviário (outros modais retornam erro), apenas ICMS CST 00 (tributação normal), e nenhuma tabela de endpoints SEFAZ CT-e embutida/verificada — toda chamada SEFAZ abaixo exige `endpoint_override` explícito. Desde a v0.7.0, `br__generate_cte` também aceita os campos da Reforma Tributária do Consumo (IBS/CBS) introduzidos pela NT 2026.002 — `imp/IBSCBS`, `emit/ISUFEmit` e `ide/tpPagAnt`+`gPagAntecipado` — com as regras de negócio autocontidas da NT aplicadas na camada de modelo; regras que exigem consulta ao banco de dados da SEFAZ não são verificadas. Desde a v0.10.0, também são suportados `vPrest/vTPrestLiq`, `imp/vTotDFe`, `emit/tpRegimeIBSCBS` e `imp/IBSCBS/gTribSN` (NT 2026.004 v1.01 e NT 2026.005 v1.00); `ide/gMultaJuros` e o grupo de ICMS previsto em pagamento antecipado ainda não são suportados.
+A cobertura de CT-e (Conhecimento de Transporte Eletrônico) começou na v0.6.0. **O escopo v1 é intencionalmente restrito**: apenas modal rodoviário (outros modais retornam erro), apenas ICMS CST 00 (tributação normal) e 40/41/51 (`ICMS45`), e nenhuma tabela de endpoints SEFAZ CT-e embutida/verificada — toda chamada SEFAZ abaixo exige `endpoint_override` explícito. Desde a v0.7.0, `br__generate_cte` também aceita os campos da Reforma Tributária do Consumo (IBS/CBS) introduzidos pela NT 2026.002 — `imp/IBSCBS`, `emit/ISUFEmit` e `ide/tpPagAnt`+`gPagAntecipado` — com as regras de negócio autocontidas da NT aplicadas na camada de modelo; regras que exigem consulta ao banco de dados da SEFAZ não são verificadas. Desde a v0.10.0, também são suportados `vPrest/vTPrestLiq`, `imp/vTotDFe`, `emit/tpRegimeIBSCBS` e `imp/IBSCBS/gTribSN` (NT 2026.004 v1.01 e NT 2026.005 v1.00); `ide/gMultaJuros` (NT 2026.004, com as regras autocontidas RV 1072, 1073 e 1078) e `pgtoVinc` (NT 2026.001) são suportados desde a v0.13.0; o grupo de ICMS previsto em pagamento antecipado ainda não é.
 
 ### `br__generate_cte`
 
@@ -219,7 +219,7 @@ Gera um documento CT-e 4.00 **não assinado** (`<CTe><infCte>…</infCte></CTe>`
 
 | Parâmetro | Tipo | Obrigatório | Descrição |
 |---|---|---|---|
-| `cte` | `object` | sim | `BRCTeDocument` (modelo 57, modal rodoviário, ICMS CST 00) |
+| `cte` | `object` | sim | `BRCTeDocument` (modelo 57, modal rodoviário, ICMS CST 00/40/41/51) |
 
 Retorna `{"xml": ..., "chave_acesso": ..., "warnings": [...]}`.
 

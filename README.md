@@ -211,7 +211,7 @@ Returns `{"chave_acesso": ..., "cnf": ...}`.
 
 ## CT-e (modelo 57) tools
 
-CT-e (Conhecimento de Transporte Eletrônico) coverage started at v0.6.0. **v1 scope is intentionally narrow**: modal rodoviário only (other modais raise an error), ICMS CST 00 (tributação normal) only, and no bundled/verified SEFAZ CT-e endpoint table — every SEFAZ call below requires an explicit `endpoint_override`. Since v0.7.0, `br__generate_cte` also accepts the Reforma Tributária do Consumo (IBS/CBS) fields introduced by NT 2026.002 — `imp/IBSCBS`, `emit/ISUFEmit`, and `ide/tpPagAnt`+`gPagAntecipado` — with the NT's self-contained business rules enforced at the model layer; rules that require a live SEFAZ database lookup are not checked. Since v0.10.0 it also supports `vPrest/vTPrestLiq`, `imp/vTotDFe`, `emit/tpRegimeIBSCBS`, and `imp/IBSCBS/gTribSN` (NT 2026.004 v1.01 and NT 2026.005 v1.00); `ide/gMultaJuros` and the ICMS advance-payment group are not yet supported.
+CT-e (Conhecimento de Transporte Eletrônico) coverage started at v0.6.0. **v1 scope is intentionally narrow**: modal rodoviário only (other modais raise an error), ICMS CST 00 (tributação normal) and 40/41/51 (`ICMS45`) only, and no bundled/verified SEFAZ CT-e endpoint table — every SEFAZ call below requires an explicit `endpoint_override`. Since v0.7.0, `br__generate_cte` also accepts the Reforma Tributária do Consumo (IBS/CBS) fields introduced by NT 2026.002 — `imp/IBSCBS`, `emit/ISUFEmit`, and `ide/tpPagAnt`+`gPagAntecipado` — with the NT's self-contained business rules enforced at the model layer; rules that require a live SEFAZ database lookup are not checked. Since v0.10.0 it also supports `vPrest/vTPrestLiq`, `imp/vTotDFe`, `emit/tpRegimeIBSCBS`, and `imp/IBSCBS/gTribSN` (NT 2026.004 v1.01 and NT 2026.005 v1.00); `ide/gMultaJuros` (NT 2026.004, with the stateless rules RV 1072, 1073 and 1078) and `pgtoVinc` (NT 2026.001) are supported since v0.13.0; the ICMS advance-payment group is not yet.
 
 ### `br__generate_cte`
 
@@ -219,7 +219,7 @@ Generates an **unsigned** CT-e 4.00 document (`<CTe><infCte>…</infCte></CTe>`)
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `cte` | `object` | yes | `BRCTeDocument` (modelo 57, modal rodoviário, ICMS CST 00) |
+| `cte` | `object` | yes | `BRCTeDocument` (modelo 57, modal rodoviário, ICMS CST 00/40/41/51) |
 
 Returns `{"xml": ..., "chave_acesso": ..., "warnings": [...]}`.
 
