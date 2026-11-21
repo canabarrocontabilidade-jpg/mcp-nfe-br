@@ -15,12 +15,32 @@ from typing import Annotated
 from mcp_einvoicing_core.base_server import assert_not_read_only
 from mcp_einvoicing_core.confirmation import ConfirmationGate
 from mcp_einvoicing_core.exceptions import EInvoicingError, PlatformError
-from mcp_einvoicing_core.xml_utils import resolve_xml_input
+from mcp_einvoicing_core.xml_utils import resolve_xml_input, safe_fromstring
 
 from mcp_nfe_br.models.invoice import TipoAmbiente
 from mcp_nfe_br.standards.sefaz_client import SefazClient
 
 _READ_ONLY_ENV_VAR = "BR_READ_ONLY"
+
+_NFE_NS = "{http://www.portalfiscal.inf.br/nfe}"
+
+
+def _emitente_sem_ie(xml_bytes: bytes) -> bool:
+    """True when a model 55 NF-e has no `emit/IE` (contribuinte exclusivo do IBS/CBS).
+
+    Such documents are authorized only on the SVRS web service (NT 2026.007 v1.11,
+    rule C17-11). A document that cannot be parsed returns False so the SEFAZ
+    client reports the real error instead of this routing helper.
+    """
+    try:
+        root = safe_fromstring(xml_bytes)
+    except Exception:
+        return False
+    emit = root.find(f".//{_NFE_NS}infNFe/{_NFE_NS}emit")
+    mod = root.find(f".//{_NFE_NS}infNFe/{_NFE_NS}ide/{_NFE_NS}mod")
+    if emit is None or mod is None or (mod.text or "").strip() != "55":
+        return False
+    return emit.find(f"{_NFE_NS}IE") is None
 
 
 async def br__consult_sefaz_status(
@@ -34,6 +54,11 @@ async def br__consult_sefaz_status(
         str | None,
         "URL completa do webservice NFeStatusServico4 (sobrepõe a tabela de roteamento por UF)",
     ] = None,
+    contribuinte_exclusivo_ibs_cbs: Annotated[
+        bool,
+        "True para emitente sem IE (contribuinte exclusivo do IBS/CBS): roteia para a SVRS "
+        "(NT 2026.007, regra C17-11)",
+    ] = False,
 ) -> dict[str, object]:
     """Consulta a disponibilidade do webservice SEFAZ (`NFeStatusServico4`).
 
@@ -52,6 +77,7 @@ async def br__consult_sefaz_status(
         cert_password=cert_password,
         service="status_servico",
         endpoint_override=endpoint_override,
+        contribuinte_exclusivo_ibs_cbs=contribuinte_exclusivo_ibs_cbs,
     )
     try:
         return await client.consultar_status_servico()
@@ -85,6 +111,10 @@ async def br__submit_nfe(
     Submissão para SEFAZ é uma operação irreversível em produção e exige
     confirmação em duas etapas (`ConfirmationGate`). Define `BR_READ_ONLY=1`
     para desabilitar esta ferramenta.
+
+    NF-e modelo 55 sem `emit/IE` (contribuinte exclusivo do IBS/CBS) é roteada
+    automaticamente para a SVRS, a única autorizadora permitida (NT 2026.007,
+    regra C17-11), independentemente de `c_uf`.
 
     Retorna `protNFe` (incluindo `nProt`, o `protocolo de autorização`) em
     caso de sucesso, ou `error`.
@@ -124,6 +154,7 @@ async def br__submit_nfe(
         cert_password=cert_password,
         service="autorizacao",
         endpoint_override=endpoint_override,
+        contribuinte_exclusivo_ibs_cbs=_emitente_sem_ie(xml_bytes),
     )
     try:
         result = await client.autorizar_nfe(xml_bytes, id_lote)

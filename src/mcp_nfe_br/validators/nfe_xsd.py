@@ -6,7 +6,7 @@ delta (`tpImp=6`, redefined `tpEmis=9`/`indPres=4`, `cIndOp`, `ISUFEmit`, and
 the 0-5 `cMsg`/`xMsg` alert group in `protNFe` — BR-NFE-2026-08, verified
 against the official `PL_010e_v1.02.zip` schema package), further patched
 with the PL_010f_v1.04 delta (NT 2026.007 v1.00: `emit/IE` becomes optional
-for taxpayers exclusively subject to IBS/CBS — produção 2026-11-03, future;
+for taxpayers exclusively subject to IBS/CBS — produção 2026-11-16 per NT 2026.007 v1.11;
 `vNFTot` type renamed `TDec_1302Opc` → `TDec_1302`, cosmetic — verified
 against the official `PL_010f_v1.04.zip` schema package):
 

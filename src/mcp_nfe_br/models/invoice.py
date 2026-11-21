@@ -17,7 +17,9 @@ IBS/CBS/Imposto Seletivo (Grupo UB/W03, NT 2025.002-RTC) item-level
 (`BRGrupoImpostoSeletivo`/`BRGrupoIBSCBS`) and document-level
 (`BRGrupoIBSCBSTot`) field groups are modeled as `Optional` per
 `[Verified locally]` against `NT_2025.002_v1.50_RTC_NF-e_IBS_CBS_IS.pdf`.
-Several monofásico/diferimento/devolução/redução/Suframa subgroups remain
+The monofásico group (`gIBSCBSMono`, `TMonofasia` v1.50) and its `gMono` totals
+are modeled in `mcp_nfe_br.models.monofasia`. Several diferimento/devolução/
+redução/Suframa subgroups remain
 `[NEED: not yet modeled, see br.md "Known gaps"]`, and the mandatory-validation
 activation date (rule UB12-10) is `[NEED: still "Implementação futura" with no
 concrete date as of NT 2025.002 v1.50 — do not hardcode]`.
@@ -32,6 +34,7 @@ from mcp_einvoicing_core import InvoiceLineItem
 from mcp_einvoicing_core.models import InvoiceDocument
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from mcp_nfe_br.models.monofasia import BRGrupoIBSCBSMono, BRGrupoMonoTot
 from mcp_nfe_br.utils.document_ids import validate_cnpj, validate_cpf
 
 
@@ -95,11 +98,15 @@ class BREmitente(BaseModel):
     x_nome: str = Field(..., description="Razão social ou nome do emitente")
     x_fant: str | None = Field(default=None, description="Nome fantasia")
     ender_emit: BREndereco = Field(..., description="Endereço do emitente")
-    # NT 2026.007 v1.00 / PL_010f_v1.04 made emit/IE optional at the XSD level for
-    # taxpayers exclusively subject to IBS/CBS (produção 2026-11-03, still future).
-    # Deliberately kept required here: no IBS/CBS-exclusive-taxpayer classification
-    # field exists yet to gate the relaxation correctly. Revisit closer to that date.
-    ie: str = Field(..., description="Inscrição Estadual")
+    ie: str | None = Field(
+        default=None,
+        description=(
+            "Inscrição Estadual do emitente (C17, 0-1). Não informar para contribuinte "
+            "exclusivo do IBS/CBS (não contribuinte do ICMS): a ausência de `emit/IE` é o que "
+            "o caracteriza, sujeito à verificação no CCC pela SEFAZ. [Verified locally — "
+            "NFe_NT2026.007_v1.11 §2 e §4.1, produção 2026-11-16]"
+        ),
+    )
     ie_st: str | None = Field(default=None, description="IE do Substituto Tributário")
     im: str | None = Field(default=None, description="Inscrição Municipal")
     crt: RegimeTributario = Field(..., description="Código de Regime Tributário")
@@ -148,6 +155,12 @@ class BREmitente(BaseModel):
                 "(CRT 3) — NT 2026.005 §2.1."
             )
         return self
+
+    @property
+    def is_contribuinte_exclusivo_ibs_cbs(self) -> bool:
+        """True when `emit/IE` is not informed (NT 2026.007 §2: identified by the absence of
+        the IE; the CNPJ situation and the CCC lookup are checked by the SEFAZ, not here)."""
+        return not self.ie
 
     @model_validator(mode="after")
     def check_one_document(self) -> BREmitente:
@@ -324,10 +337,29 @@ class BRGrupoIBSCBS(BaseModel):
         description="Valor do IBS, soma de vIBSUF e vIBSMun (UB54a)",
     )
     cbs: BRGrupoCBS | None = Field(default=None, description="Grupo de informações da CBS (UB55)")
+    g_ibscbs_mono: BRGrupoIBSCBSMono | None = Field(
+        default=None,
+        description=(
+            "IBS/CBS monofásico (`gIBSCBSMono`, `TMonofasia`, NT 2025.002 v1.50). Alternativo "
+            "ao grupo `gIBSCBS` (vBC, IBS, CBS) no XSD: não informar os dois."
+        ),
+    )
     g_trib_sn: BRGrupoTribSN | None = Field(
         default=None,
         description="Composição do IBS e da CBS para o Simples Nacional (UB115a, NT 2026.005)",
     )
+
+    @model_validator(mode="after")
+    def check_mono_excludes_gibscbs(self) -> BRGrupoIBSCBS:
+        """`gIBSCBS` and `gIBSCBSMono` are alternatives in the `TTribNFe` choice."""
+        if self.g_ibscbs_mono is not None and any(
+            v is not None for v in (self.v_bc, self.ibs_uf, self.ibs_mun, self.v_ibs, self.cbs)
+        ):
+            raise ValueError(
+                "gIBSCBSMono é alternativo ao grupo gIBSCBS: não informar v_bc, ibs_uf, ibs_mun, "
+                "v_ibs ou cbs junto com g_ibscbs_mono."
+            )
+        return self
 
 
 class BRGrupoIBSSN(BaseModel):
@@ -461,6 +493,9 @@ class BRGrupoIBSCBSTot(BaseModel):
     )
     ibs: BRGrupoIBSTot | None = Field(default=None, description="Grupo total do IBS (W36)")
     cbs: BRGrupoCBSTot | None = Field(default=None, description="Grupo total da CBS (W50)")
+    g_mono: BRGrupoMonoTot | None = Field(
+        default=None, description="Totais do IBS/CBS monofásico (gMono, NT 2025.002 v1.50)"
+    )
     g_trib_sn: BRGrupoTribSNTot | None = Field(
         default=None, description="Totais do IBS/CBS do Simples Nacional (W59h, NT 2026.005)"
     )
@@ -779,6 +814,51 @@ class BRInvoice(InvoiceDocument):
     def check_modelo_requirements(self) -> BRInvoice:
         if self.modelo == NFeModelo.NFCE and not self.pagamentos:
             raise ValueError("NFC-e (modelo 65) requer ao menos um elemento <detPag>.")
+        return self
+
+    @model_validator(mode="after")
+    def check_contribuinte_exclusivo_ibs_cbs(self) -> BRInvoice:
+        """NT 2026.007 v1.11: stateless rules for an emitter without `emit/IE`
+        (contribuinte exclusivo do IBS/CBS). `[Verified locally —
+        NFe_NT2026.007_v1.11 - Emissão NF-e sem IE.pdf]`:
+
+        - C17-42 (cStat 156): NFC-e (modelo 65) is forbidden (the NT lifts it from 2033);
+        - C17-43 (157): the emitter must be identified by CNPJ;
+        - C18-50 (158): `emit/IEST` is forbidden;
+        - N01-10 (161): no ICMS group, except `finNFe=4` (devolução);
+        - UB12-11 (162): every item must carry the IBS/CBS group.
+
+        Not checked here (stateful or table-driven, SEFAZ-side): CCC/LCC-RFB lookups
+        (1C17-02/04, 12C02-*), the CFOP table with `indExcIBSCBS` (I08-191), and the
+        `tpNFCredito=03` exception, since `tpNFCredito` is not modeled."""
+        emit = self.emitente
+        if not emit.is_contribuinte_exclusivo_ibs_cbs:
+            return self
+        if self.modelo == NFeModelo.NFCE:
+            raise ValueError(
+                "C17-42: NFC-e (modelo 65) não pode ser emitida por contribuinte exclusivo do "
+                "IBS/CBS (emit/IE não informada)."
+            )
+        if not emit.cnpj:
+            raise ValueError(
+                "C17-43: obrigatório informar o CNPJ do emitente para contribuinte exclusivo do "
+                "IBS/CBS (emit/IE não informada)."
+            )
+        if emit.ie_st:
+            raise ValueError(
+                "C18-50: proibido informar a IEST para contribuinte exclusivo do IBS/CBS."
+            )
+        for n, line in enumerate(self.lines, start=1):
+            if line.ibs_cbs is None:
+                raise ValueError(
+                    f"UB12-11: grupo IBS/CBS obrigatório para contribuinte exclusivo do IBS/CBS "
+                    f"(item {n})."
+                )
+            if self.fin_nfe != "4" and line.icms_cst is not None:
+                raise ValueError(
+                    f"N01-10: proibido informar ICMS para contribuinte exclusivo do IBS/CBS "
+                    f"(item {n}), exceto finNFe=4."
+                )
         return self
 
     @model_validator(mode="after")

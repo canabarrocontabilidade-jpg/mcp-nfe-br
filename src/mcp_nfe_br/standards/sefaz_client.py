@@ -262,7 +262,13 @@ def _autorizador_for(cuf: str) -> str:
     return autorizador
 
 
-def get_endpoint(service: str, cuf: str, tp_amb: TipoAmbiente) -> str:
+def get_endpoint(
+    service: str,
+    cuf: str,
+    tp_amb: TipoAmbiente,
+    *,
+    contribuinte_exclusivo_ibs_cbs: bool = False,
+) -> str:
     """Resolve the SOAP endpoint URL for *service* / *cuf* / *tp_amb*.
 
     Args:
@@ -272,12 +278,20 @@ def get_endpoint(service: str, cuf: str, tp_amb: TipoAmbiente) -> str:
             For ``distribuicao_dfe`` this is ignored — the Ambiente Nacional
             endpoint is always used.
         tp_amb: `TipoAmbiente.PRODUCAO` or `TipoAmbiente.HOMOLOGACAO`.
+        contribuinte_exclusivo_ibs_cbs: ``True`` for an emitter without `emit/IE`
+            (contribuinte exclusivo do IBS/CBS). NT 2026.007 v1.11 rule C17-11
+            (cStat 166) requires authorization on the SVRS web service whatever
+            the emitter's UF, so the UF routing table is bypassed. Ignored for
+            ``distribuicao_dfe``. `[Verified locally —
+            NFe_NT2026.007_v1.11 - Emissão NF-e sem IE.pdf §2]`
 
     Raises:
         ValueError: If no endpoint is configured for the given inputs.
     """
     if service == "distribuicao_dfe":
         autorizador = "AN"
+    elif contribuinte_exclusivo_ibs_cbs:
+        autorizador = "SVRS"
     else:
         autorizador = _autorizador_for(cuf)
 
@@ -475,10 +489,16 @@ class SefazClient(BaseEInvoicingClient):
         service: str = "autorizacao",
         endpoint_override: str | None = None,
         http_timeout: float = 60.0,
+        contribuinte_exclusivo_ibs_cbs: bool = False,
     ) -> None:
         self._cuf = cuf
         self._tp_amb = tp_amb
-        base_url = endpoint_override or get_endpoint(service, cuf, tp_amb)
+        base_url = endpoint_override or get_endpoint(
+            service,
+            cuf,
+            tp_amb,
+            contribuinte_exclusivo_ibs_cbs=contribuinte_exclusivo_ibs_cbs,
+        )
         super().__init__(
             base_url=base_url,
             auth_mode=AuthMode.MTLS,

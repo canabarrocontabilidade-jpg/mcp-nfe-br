@@ -1,5 +1,13 @@
 # mcp-nfe-br — Release Notes
 
+## v0.12.0 (2026-11-21) — Emitter without IE (exclusive IBS/CBS) and IBS/CBS monofásico
+
+- New: `BREmitente.ie` is optional. An emitter without `emit/IE` is a contribuinte exclusivo do IBS/CBS (NT 2026.007 v1.11, production 2026-11-16); the model enforces the stateless rules (no NFC-e, CNPJ required, no IEST, no ICMS except `finNFe=4`, IBS/CBS on every item) and the generator omits `IE` and the ICMS group.
+- New: such documents are authorized on SVRS only. `get_endpoint` and `SefazClient` take `contribuinte_exclusivo_ibs_cbs`, `br__submit_nfe` detects the case automatically, and `br__consult_sefaz_status` gains the flag.
+- New: IBS/CBS monofásico (`gIBSCBSMono`, `TMonofasia` NT 2025.002 v1.50) per item and `IBSCBSTot/gMono` totals, XSD-validated against PL_010h_v1.03.
+- Not covered: CCC/LCC-RFB lookups, the `indExcIBSCBS` CFOP table, the `tpNFCredito=03` exception, and the NT's monofásico arithmetic rules (SEFAZ-side or not modeled).
+- 344 tests passing (1 skipped); audit gate 0 blocking.
+
 ## v0.11.1 (2026-11-21) — IBS/CBS emission validates against PL_010h_v1.03
 
 - Fix: item `IBSCBS` now emits `CST`, the `gIBSCBS` group (`vBC`, `gIBSUF`, `gIBSMun`, `vIBS`, `gCBS`) and `gTribSN` as its sibling, matching the official schema.

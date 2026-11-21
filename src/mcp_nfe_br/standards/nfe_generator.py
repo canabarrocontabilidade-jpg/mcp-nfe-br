@@ -60,6 +60,11 @@ from mcp_nfe_br.models.invoice import (
     BRInvoice,
     BRInvoiceLine,
 )
+from mcp_nfe_br.models.monofasia import (
+    BRGrupoIBSCBSMono,
+    BRGrupoMonoTot,
+    MonoLeaf,
+)
 from mcp_nfe_br.utils.access_key import build_access_key
 
 _NAMESPACE = "http://www.portalfiscal.inf.br/nfe"
@@ -142,7 +147,7 @@ def _emit_block(invoice: BRInvoice) -> str:
         xml_element("xNome", emit.x_nome),
         xml_optional("xFant", emit.x_fant),
         _endereco_block("enderEmit", emit.ender_emit),
-        xml_element("IE", emit.ie),
+        xml_optional("IE", emit.ie),
         xml_optional("IEST", emit.ie_st),
         xml_optional("IM", emit.im),
         xml_element("CRT", emit.crt.value),
@@ -492,6 +497,7 @@ def _ibs_cbs_block(line: BRInvoiceLine) -> str:
         )
         cbs_xml = xml_element("gCBS", cbs_inner, unsafe=True)
 
+    g_ibscbs_mono_xml = _ibscbs_mono_xml(g.g_ibscbs_mono) if g.g_ibscbs_mono is not None else ""
     g_ibscbs_inner = "".join(
         [
             xml_optional("vBC", _d2(g.v_bc) if g.v_bc else None),
@@ -506,9 +512,67 @@ def _ibs_cbs_block(line: BRInvoiceLine) -> str:
         xml_optional("cClassTrib", g.c_class_trib),
         xml_optional("indDoacao", g.ind_doacao),
         xml_element("gIBSCBS", g_ibscbs_inner, unsafe=True) if g_ibscbs_inner else "",
+        g_ibscbs_mono_xml,
         _trib_sn_xml(g.g_trib_sn),
     ]
     return xml_element("IBSCBS", "".join(p for p in parts if p), unsafe=True)
+
+
+def _q4(value: str | Decimal) -> str:
+    """Format a quantity to TDec1104RTC: exactly 4 decimals when fractional."""
+    return format_amount(Decimal(str(value)), 4, rounding_mode=ROUND_HALF_UP)
+
+
+_MONO_FORMATS = {"q": _q4, "pct": _percent, "d2": _d2}
+
+
+def _mono_leaf_xml(tag: str, leaf: MonoLeaf) -> str:
+    """Serialize a monofásico leaf group in the order of its `XML_FIELDS` table."""
+    inner = "".join(
+        xml_element(xml_tag, _MONO_FORMATS[fmt](getattr(leaf, attr)))
+        for attr, xml_tag, fmt in leaf.XML_FIELDS
+    )
+    return xml_element(tag, inner, unsafe=True)
+
+
+def _mono_side_xml(tag: str, group: object | None) -> str:
+    """`g{IBS,CBS}Mono{AdRem,AdValorem}`: padrão, retenção, retido, biocombustível."""
+    if group is None:
+        return ""
+    parts = [
+        ("g_mono_padrao", "gMonoPadrao"),
+        ("g_mono_reten", "gMonoReten"),
+        ("g_mono_ret", "gMonoRet"),
+        ("g_bio_diferenca", "gpBioDiferenca"),
+    ]
+    inner = "".join(
+        _mono_leaf_xml(xml_tag, leaf)
+        for attr, xml_tag in parts
+        if (leaf := getattr(group, attr)) is not None
+    )
+    return xml_element(tag, inner, unsafe=True)
+
+
+def _ibscbs_mono_xml(mono: BRGrupoIBSCBSMono) -> str:
+    """`gIBSCBSMono` (`TMonofasia`): IBS choice, CBS choice, then the two item totals.
+
+    `[Verified locally]` element order against PL_010h_v1.03 `TMonofasia`.
+    """
+    inner = "".join(
+        [
+            _mono_side_xml("gIBSMonoAdRem", mono.g_ibs_mono_ad_rem),
+            _mono_side_xml("gIBSMonoAdValorem", mono.g_ibs_mono_ad_valorem),
+            _mono_side_xml("gCBSMonoAdRem", mono.g_cbs_mono_ad_rem),
+            _mono_side_xml("gCBSMonoAdValorem", mono.g_cbs_mono_ad_valorem),
+            xml_element("vTotIBSMonoItem", _d2(mono.v_tot_ibs_mono_item)),
+            xml_element("vTotCBSMonoItem", _d2(mono.v_tot_cbs_mono_item)),
+        ]
+    )
+    return xml_element("gIBSCBSMono", inner, unsafe=True)
+
+
+def _mono_tot_xml(tot: BRGrupoMonoTot | None) -> str:
+    return "" if tot is None else _mono_leaf_xml("gMono", tot)
 
 
 def _trib_sn_xml(sn: BRGrupoTribSN | None) -> str:
@@ -614,6 +678,7 @@ def _ibscbs_tot_xml(tot: BRGrupoIBSCBSTot) -> str:
             xml_optional("vBCIBSCBS", _d2(tot.v_bc_ibscbs) if tot.v_bc_ibscbs else None),
             ibs_xml,
             cbs_xml,
+            _mono_tot_xml(tot.g_mono),
             _trib_sn_tot_xml(tot),
         ]
     )
@@ -631,7 +696,7 @@ def _trib_sn_tot_xml(tot: BRGrupoIBSCBSTot) -> str:
     )
 
 
-def _det_block(line: BRInvoiceLine, n_item: int) -> str:
+def _det_block(line: BRInvoiceLine, n_item: int, *, omit_icms: bool = False) -> str:
     prod_parts = [
         xml_element("cProd", line.c_prod),
         xml_element("cEAN", line.c_ean),
@@ -656,7 +721,7 @@ def _det_block(line: BRInvoiceLine, n_item: int) -> str:
 
     v_prod = Decimal(line.v_prod)
     imposto_parts = [
-        _icms_block(line),
+        "" if omit_icms else _icms_block(line),
         _ipi_block(line),
         _pis_cofins_block("PIS", line.pis_cst, line.pis_amount, v_prod),
         _pis_cofins_block("COFINS", line.cofins_cst, line.cofins_amount, v_prod),
@@ -881,7 +946,13 @@ class NFeGenerator(BaseDocumentGenerator[InvoiceDocument]):
         emit = _emit_block(invoice)
         dest = _dest_block(invoice)
         dets = "".join(
-            _det_block(line, n_item) for n_item, line in enumerate(invoice.lines, start=1)
+            _det_block(
+                line,
+                n_item,
+                omit_icms=line.icms_cst is None
+                and invoice.emitente.is_contribuinte_exclusivo_ibs_cbs,
+            )
+            for n_item, line in enumerate(invoice.lines, start=1)
         )
         total = _icms_tot_block(invoice)
         transp = _transp_block(invoice)

@@ -143,6 +143,7 @@ indica serviço em operação `[Unverified]`).
 | `tp_amb` | string | no | `'2'` | Identificação do Ambiente (tpAmb): '1' = produção, '2' = homologação |
 | `cert_password` | string | null | no | `None` | Senha do certificado A1, se houver |
 | `endpoint_override` | string | null | no | `None` | URL completa do webservice NFeStatusServico4 (sobrepõe a tabela de roteamento por UF) |
+| `contribuinte_exclusivo_ibs_cbs` | boolean | no | `False` | True para emitente sem IE (contribuinte exclusivo do IBS/CBS): roteia para a SVRS (NT 2026.007, regra C17-11) |
 
 ## `br__correct_cte`
 
@@ -328,6 +329,10 @@ Submete um NF-e/NFC-e assinado à autorização SEFAZ (`NFeAutorizacao4`, síncr
 Submissão para SEFAZ é uma operação irreversível em produção e exige
 confirmação em duas etapas (`ConfirmationGate`). Define `BR_READ_ONLY=1`
 para desabilitar esta ferramenta.
+
+NF-e modelo 55 sem `emit/IE` (contribuinte exclusivo do IBS/CBS) é roteada
+automaticamente para a SVRS, a única autorizadora permitida (NT 2026.007,
+regra C17-11), independentemente de `c_uf`.
 
 Retorna `protNFe` (incluindo `nProt`, o `protocolo de autorização`) em
 caso de sucesso, ou `error`.
