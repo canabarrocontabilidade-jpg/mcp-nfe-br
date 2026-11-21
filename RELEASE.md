@@ -1,5 +1,12 @@
 # mcp-nfe-br — Release Notes
 
+## v0.13.0 (2026-11-21) — CT-e multa e juros, ICMS45 and pgtoVinc
+
+- New: CT-e `ide/gMultaJuros` (NT 2026.004 v1.01, production 2026-12-14). The model enforces ICMS CST 41 (RV 1072), a valid referenced key (RV 1073) and the same emitter (RV 1078); cross-document rules RV 1074-1077 and 1079-1083 need SEFAZ data and are not checked.
+- New: CT-e `ICMS45` (CST 40, 41, 51) as an alternative to `ICMS00`; `ICMS00.cst` is now restricted to `00`.
+- New: CT-e `pgtoVinc` (NT 2026.001, split payment preparatory for 2027) with receiver-CNPJ and unique-`idTransacao` checks; the events 110300 and 110301 are not implemented.
+- 360 tests passing (1 skipped); audit gate 0 blocking.
+
 ## v0.12.0 (2026-11-21) — Emitter without IE (exclusive IBS/CBS) and IBS/CBS monofásico
 
 - New: `BREmitente.ie` is optional. An emitter without `emit/IE` is a contribuinte exclusivo do IBS/CBS (NT 2026.007 v1.11, production 2026-11-16); the model enforces the stateless rules (no NFC-e, CNPJ required, no IEST, no ICMS except `finNFe=4`, IBS/CBS on every item) and the generator omits `IE` and the ICMS group.

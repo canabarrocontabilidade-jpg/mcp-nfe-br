@@ -11,9 +11,9 @@ v1 scope (roadmap BR-CTE-8, "single-modal-first, event-limited"):
   modal-specific payload's own schema conformance, but this generator only
   emits a minimal, schema-shaped `<rodo><RNTRC>…</RNTRC></rodo>` payload
   for that modal. Other modais raise `DocumentGenerationError`.
-- ICMS: CST 00 (tributação normal) only, mirroring `nfe_generator.py`'s
-  initial narrow ICMS coverage. Other CT-e ICMS variants
-  `[NEED: not modeled]`.
+- ICMS: CST 00 (`ICMS00`, tributação normal) and CST 40/41/51 (`ICMS45`). Other
+  CT-e ICMS variants (ICMS20/60/90, ICMSOutraUF, ICMSSN) `[NEED: not modeled]`.
+- `ide/gMultaJuros` (NT 2026.004) and `pgtoVinc` (NT 2026.001) are emitted when set.
 - Optional groups not modeled/emitted: `compl`, `Entrega`, `autXML`,
   `infRespTec`, `infDoc`, `ICMSUFFim`, `infAdFisco`, `veicNovos`, `lacres`,
   `origCalc`/`destCalc`, `gCompraGov`.
@@ -42,6 +42,7 @@ from mcp_einvoicing_core.xml_utils import xml_element, xml_optional
 
 from mcp_nfe_br.models.cte import (
     BRCTeDocument,
+    BRCteICMS45,
     BRCteParty,
     BRCteTribSN,
     CTeModal,
@@ -137,8 +138,36 @@ def _ide_block(cte: BRCTeDocument, *, c_ct: str, cdv: str) -> str:
         _tomador_block(cte),
         xml_optional("tpPagAnt", cte.tp_pag_ant),
         _pag_antecipado_block(cte),
+        _multa_juros_block(cte),
     ]
     return xml_element("ide", "".join(p for p in parts if p), unsafe=True)
+
+
+def _multa_juros_block(cte: BRCTeDocument) -> str:
+    """`ide/gMultaJuros` (NT 2026.004): last child of `ide`, after `gPagAntecipado`."""
+    if cte.g_multa_juros is None:
+        return ""
+    ref = xml_element("chCTeRef", cte.g_multa_juros.ch_cte_ref)
+    return xml_element("gMultaJuros", ref, unsafe=True)
+
+
+def _pgto_vinc_block(cte: BRCTeDocument) -> str:
+    """`pgtoVinc` (NT 2026.001): `pgto[nPag, idTransacao]` x 1-99, between `imp` and
+    `infCTeNorm`. `nPag` is the 1-based list position."""
+    if not cte.pgto_vinc:
+        return ""
+    items = "".join(
+        xml_element(
+            "pgto",
+            xml_element("tpMeioPgto", p.tp_meio_pgto)
+            + xml_element("CNPJReceb", p.cnpj_receb)
+            + xml_element("CNPJBasePSP", p.cnpj_base_psp),
+            attrs={"nPag": str(n), "idTransacao": p.id_transacao},
+            unsafe=True,
+        )
+        for n, p in enumerate(cte.pgto_vinc, start=1)
+    )
+    return xml_element("pgtoVinc", items, unsafe=True)
 
 
 def _pag_antecipado_block(cte: BRCTeDocument) -> str:
@@ -188,16 +217,29 @@ def _v_prest_block(cte: BRCTeDocument) -> str:
 
 def _imp_block(cte: BRCTeDocument) -> str:
     icms = cte.imp.icms
-    icms00 = xml_element(
-        "ICMS00",
-        xml_element("CST", icms.cst)
-        + xml_element("vBC", icms.v_bc)
-        + xml_element("pICMS", icms.p_icms)
-        + xml_element("vICMS", icms.v_icms),
-        unsafe=True,
-    )
+    if isinstance(icms, BRCteICMS45):
+        icms_group = xml_element(
+            "ICMS45",
+            xml_element("CST", icms.cst)
+            + (
+                xml_element("vICMSDeson", icms.v_icms_deson or "")
+                + xml_element("cBenef", icms.c_benef or "")
+                if icms.v_icms_deson is not None
+                else ""
+            ),
+            unsafe=True,
+        )
+    else:
+        icms_group = xml_element(
+            "ICMS00",
+            xml_element("CST", icms.cst)
+            + xml_element("vBC", icms.v_bc)
+            + xml_element("pICMS", icms.p_icms)
+            + xml_element("vICMS", icms.v_icms),
+            unsafe=True,
+        )
     parts = [
-        xml_element("ICMS", icms00, unsafe=True),
+        xml_element("ICMS", icms_group, unsafe=True),
         xml_optional("vTotTrib", cte.imp.v_tot_trib),
         _ibscbs_block(cte),
         xml_optional("vTotDFe", cte.imp.v_tot_dfe),
@@ -445,7 +487,18 @@ class CTeGenerator(BaseDocumentGenerator[InvoiceDocument]):
 
         inf_cte_norm = xml_element("infCTeNorm", inf_carga + inf_modal, unsafe=True)
 
-        inf_cte_body = ide + emit + rem + exped + receb + dest + v_prest + imp + inf_cte_norm
+        inf_cte_body = (
+            ide
+            + emit
+            + rem
+            + exped
+            + receb
+            + dest
+            + v_prest
+            + imp
+            + _pgto_vinc_block(cte)
+            + inf_cte_norm
+        )
         inf_cte = xml_element(
             "infCte",
             inf_cte_body,

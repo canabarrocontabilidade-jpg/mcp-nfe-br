@@ -1,3 +1,3 @@
 """MCP server for Brazilian electronic invoicing (NF-e / NFC-e)."""
 
-__version__ = "0.12.0"
+__version__ = "0.13.0"

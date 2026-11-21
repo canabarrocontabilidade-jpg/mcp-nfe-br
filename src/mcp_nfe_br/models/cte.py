@@ -19,10 +19,12 @@ cover mandatory groups discovered while building the generator): modelo 57
 only (CT-e OS, modelo 67, deferred — BR-CTE-18), `tpCTe` limited to
 `0`/`1`/`3` (Normal / Complemento de Valores / Substituição — no `Anulação`
 value found in the bundled XSD enum, so `infCTeAnu` is not modeled; see
-br.md CT-e section). `imp/ICMS` only models CST 00 (tributação normal);
+br.md CT-e section). `imp/ICMS` models CST 00 (tributação normal, `ICMS00`) and
+CST 40/41/51 (`ICMS45`, added for the multa e juros CT-e);
 `infModal` only models rodoviário (`rntrc`) — both mirror how
 `nfe_generator.py` started narrow and grew coverage across versions. Other
-modais' payloads and other ICMS CSTs are `[NEED: not modeled]`.
+modais' payloads and the other ICMS variants (ICMS20/60/90, ICMSOutraUF, ICMSSN) are
+`[NEED: not modeled]`.
 
 Impedance points (per CT-e scoping plan, resolved here):
 - `InvoiceDocument.buyer` has no CT-e equivalent — left unset. The paying
@@ -53,10 +55,11 @@ self-consistency and CNPJ-Base match) are enforced as `model_validator`s on
 - Suframa digit-verifier (RV 4.002) — `[NEED: check-digit algorithm not
   published in the NT]`.
 
-Also discovered while diffing the schema package, but explicitly **out of
-scope** for this change (different Notas Técnicas, not NT 2026.002):
-a new `TCTeSimp` document type and a `pgtoVinc`/`TPagamentoRTC` group both
-belong to NT 2026.001 ("VincPgto") and remain unimplemented.
+Discovered while diffing the schema package: a new `TCTeSimp` document type
+(still unimplemented) and the `pgtoVinc`/`TPagamentoRTC` group of NT 2026.001
+("VincPgto"). The `pgtoVinc` group is implemented (`BRCTeDocument.pgto_vinc`, reusing
+`BRPgtoVinc`; rule 01 CNPJ check); its events 110300/110301 (`evVincPgto`,
+`evCancVincPgto`) are not.
 
 NT 2026.004 v1.01 (Valor Líquido) and NT 2026.005 v1.00 (Simples Nacional) —
 schema package upgraded to `PL_CTe_400_NT2026.005 RTC SN_1.00_corr.zip`, a
@@ -65,8 +68,10 @@ superset of `PL_CTe_400_NT2026.004 RTC_1.01_corr.zip`. Implemented:
 1090/1091), `imp/IBSCBS/gTribSN` (RV 1100-1106), and the rename of
 `gPagAntecipado/chCTePagAnt` to `chDFePagAnt`. Deliberately **not**
 implemented:
-- `ide/gMultaJuros` (RV 1072-1083): RV 1072 requires ICMS CST 41 (group
-  ICMS45), which this model does not support (CST 00 only).
+- `ide/gMultaJuros` cross-document rules (RV 1074-1077, 1079-1083): they need the
+  SEFAZ database or the data of the referenced CT-e. The group itself, RV 1072
+  (ICMS45 with CST 41), RV 1073 (valid key) and RV 1078 (same emitter, read from the
+  CNPJ in the key) are implemented (NT 2026.004 v1.01, production 2026-12-14).
 - `imp/ICMS/gICMSPrevistoPagtoAntecip` (RV 1051-1053, production 2027-03-01):
   the bundled XSD declares it as a *sibling alternative* inside the `TImp`
   choice, so it cannot coexist with `ICMS00` under the schema `[Unverified:
@@ -90,13 +95,15 @@ schema. See the package's own compliance reference, CT-e section, for tracking.
 from __future__ import annotations
 
 import re
+from datetime import date
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from enum import StrEnum
 
 from mcp_einvoicing_core.models import InvoiceDocument, InvoiceParty
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from mcp_nfe_br.models.invoice import BREndereco, RegimeTributario
+from mcp_nfe_br.models.invoice import BREndereco, BRPgtoVinc, RegimeTributario
+from mcp_nfe_br.utils.access_key import access_key_check_digit
 from mcp_nfe_br.utils.document_ids import validate_cnpj, validate_cpf
 
 
@@ -383,11 +390,42 @@ class BRCteICMS00(BaseModel):
     """
 
     cst: str = Field(
-        default="00", description="Classificação Tributária do Serviço: 00 = tributação normal"
+        default="00",
+        pattern=r"^00$",
+        description="Classificação Tributária do Serviço: 00 = tributação normal",
     )
     v_bc: str = Field(..., description="Valor da BC do ICMS")
     p_icms: str = Field(..., description="Alíquota do ICMS")
     v_icms: str = Field(..., description="Valor do ICMS")
+
+
+class BRCteICMS45(BaseModel):
+    """ICMS45 (Grupo `imp/ICMS`, CST 40/41/51 — isenção, não tributada, diferimento).
+
+    `[Verified locally]` against `TImp/ICMS45` in `cteTiposBasico_v4.00.xsd`: `CST`
+    (40, 41 or 51), then an optional pair `vICMSDeson` + `cBenef` that must be informed
+    together. CST 41 is the one required for a CT-e of multa e juros (NT 2026.004 RV 1072).
+    """
+
+    cst: str = Field(
+        ...,
+        pattern=r"^(40|41|51)$",
+        description="Classificação Tributária do Serviço: 40=isenção, 41=não tributada, 51=diferimento",
+    )
+    v_icms_deson: str | None = Field(
+        default=None, description="Valor do ICMS desonerado (vICMSDeson); com cBenef"
+    )
+    c_benef: str | None = Field(
+        default=None,
+        pattern=r"^[!-ÿ]{8}$|^[!-ÿ]{10}$",
+        description="Código de benefício fiscal na UF (cBenef), 8 ou 10 caracteres; com vICMSDeson",
+    )
+
+    @model_validator(mode="after")
+    def check_deson_pair(self) -> BRCteICMS45:
+        if (self.v_icms_deson is None) != (self.c_benef is None):
+            raise ValueError("vICMSDeson e cBenef devem ser informados em conjunto (ICMS45).")
+        return self
 
 
 class BRCteDif(BaseModel):
@@ -632,7 +670,9 @@ class BRCteImpIBSCBS(BaseModel):
 class BRCteImp(BaseModel):
     """Informações relativas aos Impostos (Grupo `imp`)."""
 
-    icms: BRCteICMS00 = Field(..., description="Informações relativas ao ICMS (Grupo imp/ICMS)")
+    icms: BRCteICMS00 | BRCteICMS45 = Field(
+        ..., description="Informações relativas ao ICMS (Grupo imp/ICMS): ICMS00 ou ICMS45"
+    )
     v_tot_trib: str | None = Field(default=None, description="Valor Total dos Tributos (vTotTrib)")
     ibscbs: BRCteImpIBSCBS | None = Field(
         default=None,
@@ -645,6 +685,51 @@ class BRCteImp(BaseModel):
             "vTPrest; a partir de 2027 é vTPrest + vIBS + vCBS."
         ),
     )
+
+
+class BRCteMultaJuros(BaseModel):
+    """`ide/gMultaJuros` (NT 2026.004 v1.01, production 2026-12-14): CT-e de multa e juros.
+
+    References the CT-e on which the fine and interest are charged. `[Verified locally]` —
+    `CTe_Nota_Tecnica_2026_004_v101.pdf` and `TCTe/ide/gMultaJuros` in the bundled schema.
+    """
+
+    ch_cte_ref: str = Field(
+        ...,
+        pattern=r"^[0-9]{6}[A-Z0-9]{12}[0-9]{26}$",
+        description="Chave de acesso do CT-e referenciado para cobrar multa e juros (chCTeRef)",
+    )
+
+
+_CTE_UF_CODES = frozenset(
+    "11 12 13 14 15 16 17 21 22 23 24 25 26 27 28 29 31 32 33 35 41 42 43 50 51 52 53".split()
+)
+
+
+def _cte_key_problem(key: str, *, today_year: int) -> str | None:
+    """Stateless checks of RV 1073 (first problem found, or None): UF, year/month,
+    CNPJ, model 57, number, `tpEmis` and check digit. `[Verified locally]` against the
+    `TChDFe` layout (`cUF AAMM CNPJ mod serie nCT tpEmis cCT cDV`) and the `tpEmis`
+    enum (1, 2) of the bundled schema."""
+    if key[:2] not in _CTE_UF_CODES:
+        return "UF inválida"
+    year, month = 2000 + int(key[2:4]), int(key[4:6])
+    if year < 2009 or year > today_year:
+        return "Ano < 2009 ou maior que o atual"
+    if not 1 <= month <= 12:
+        return "Mês inválido"
+    cnpj = key[6:20]
+    if set(cnpj) == {"0"} or not validate_cnpj(cnpj):
+        return "CNPJ zerado ou inválido"
+    if key[20:22] != "57":
+        return "Modelo diferente de 57"
+    if key[25:34] == "000000000":
+        return "Número zerado"
+    if key[34] not in ("1", "2"):
+        return "Tipo de emissão inválido"
+    if access_key_check_digit(key[:43]) != key[43]:
+        return "DV inválido"
+    return None
 
 
 class BRCteInfQ(BaseModel):
@@ -827,6 +912,19 @@ class BRCTeDocument(InvoiceDocument):
         ),
     )
 
+    g_multa_juros: BRCteMultaJuros | None = Field(
+        default=None,
+        description="Grupo de informações de multa e juros (ide/gMultaJuros, NT 2026.004).",
+    )
+    pgto_vinc: list[BRPgtoVinc] = Field(
+        default_factory=list,
+        max_length=99,
+        description=(
+            "Vinculação com a transação de pagamento (pgtoVinc/pgto, NT 2026.001, split payment "
+            "preparatório para 2027). `nPag` é atribuído pelo gerador pela ordem da lista."
+        ),
+    )
+
     lines: list = Field(
         default_factory=list, description="Não utilizado por CT-e — ver docstring do módulo."
     )
@@ -886,6 +984,51 @@ class BRCTeDocument(InvoiceDocument):
             raise ValueError(
                 "Chaves de acesso repetidas em ide/gPagAntecipado (NT 2026.002 RV 7.011)."
             )
+        return self
+
+    @model_validator(mode="after")
+    def check_multa_juros(self) -> BRCTeDocument:
+        """NT 2026.004 v1.01, stateless rules of the multa e juros group: RV 1072 (ICMS must
+        be CST 41, group ICMS45), RV 1073 (valid reference key, model 57) and RV 1078 (the
+        referenced CT-e has the same emitter, read from the CNPJ embedded in the key).
+        Not checked (need the SEFAZ database or the referenced document): RV 1074-1077,
+        1079-1083."""
+        mj = self.g_multa_juros
+        if mj is None:
+            return self
+        if not (isinstance(self.imp.icms, BRCteICMS45) and self.imp.icms.cst == "41"):
+            raise ValueError(
+                "CT-e de multa e juros não pode ser tributado pelo ICMS: informe ICMS45 com "
+                "CST 41 (RV 1072)."
+            )
+        problem = _cte_key_problem(mj.ch_cte_ref, today_year=date.today().year)
+        if problem is not None:
+            raise ValueError(
+                f"Chave de acesso do CT-e referenciado em multa e juros inválida: {problem} "
+                f"(RV 1073) [chCTe:{mj.ch_cte_ref}]."
+            )
+        emit_cnpj = self.emitente.cnpj
+        if emit_cnpj is not None and mj.ch_cte_ref[6:20].upper() != emit_cnpj.upper():
+            raise ValueError(
+                "O emitente do CT-e referenciado em multa e juros deve ser o mesmo do CT-e de "
+                "multa e juros (RV 1078): CNPJ da chave difere do CNPJ do emitente."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def check_pgto_vinc(self) -> BRCTeDocument:
+        """NT 2026.001 rule 01 (cStat 1001): valid CNPJ of each payment receiver, reported
+        with the payment number; the schema rejects repeated `idTransacao`."""
+        ids: set[str] = set()
+        for n, pgto in enumerate(self.pgto_vinc, start=1):
+            if not validate_cnpj(pgto.cnpj_receb):
+                raise ValueError(f"CNPJ do recebedor do pagamento inválido [nPag: {n}] (1001).")
+            if pgto.id_transacao in ids:
+                raise ValueError(
+                    f"idTransacao repetido em pgtoVinc ({pgto.id_transacao!r}); o schema "
+                    "exige valores únicos."
+                )
+            ids.add(pgto.id_transacao)
         return self
 
     @model_validator(mode="after")
